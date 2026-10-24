@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+
+# Environment secrets
+.env
+backend/.env
+
+# User documents and downloaded model/cache artifacts
+/storage/
+/model-cache/
+
+# Test artifacts
+.pytest_cache/
+backend/.pytest_cache/
+htmlcov/
+
+/test-temp/
+/backend/citation_fix.patch

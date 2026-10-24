@@ -1,0 +1,45 @@
+{
+  "dataset_version": 1,
+  "dataset_name": "enterprise-knowledge-base-rag-baseline",
+  "notes": "Small initial baseline. Supporting chunks use original filename and content-substring locators instead of database-generated numeric IDs.",
+  "cases": [
+    {
+      "id": "leave-types",
+      "question": "What types of leave are mentioned in the company leave policy?",
+      "answerable": true,
+      "expected_facts": ["annual leave", "sick leave"],
+      "supporting_chunks": [
+        {
+          "document_filename": "leave_policy.txt",
+          "content_contains": "Employees may take annual leave and sick leave under the company leave policy."
+        }
+      ]
+    },
+    {
+      "id": "leave-policy-coverage",
+      "question": "Which kinds of leave may employees take under the company policy?",
+      "answerable": true,
+      "expected_facts": ["annual leave", "sick leave"],
+      "supporting_chunks": [
+        {
+          "document_filename": "leave_policy.txt",
+          "content_contains": "Employees may take annual leave and sick leave under the company leave policy."
+        }
+      ]
+    },
+    {
+      "id": "annual-leave-duration",
+      "question": "How many days of annual leave does the policy grant?",
+      "answerable": false,
+      "expected_facts": [],
+      "supporting_chunks": []
+    },
+    {
+      "id": "parental-leave",
+      "question": "What is the company's parental leave allowance?",
+      "answerable": false,
+      "expected_facts": [],
+      "supporting_chunks": []
+    }
+  ]
+}
