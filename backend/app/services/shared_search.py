@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import db
 from app.models import Document, DocumentChunk
 from app.services import semantic_search as original
-from app.services.embedding_service import EmbeddingError
+from app.services.embedding_service import EmbeddingError, embedding_model_identity
 from app.services.semantic_search import (
     MAX_RESULT_TEXT_LENGTH, SearchDatabaseError, _content_hash,
     _cosine_similarity, _to_result, _validated_vector, validate_limit,
@@ -27,6 +27,7 @@ def search_chunks(query, user_id, limit=5, document_id=None):
     limit = validate_limit(limit)
     model = __import__("flask").current_app.config["EMBEDDING_MODEL_NAME"]
     dimension = __import__("flask").current_app.config["EMBEDDING_DIMENSION"]
+    model_identity = embedding_model_identity(model, dimension)
     try:
         base_query = (
             db.session.query(DocumentChunk, Document)
@@ -35,7 +36,7 @@ def search_chunks(query, user_id, limit=5, document_id=None):
                 or_(Document.uploaded_by == user_id, Document.is_shared.is_(True)),
                 Document.status == "PROCESSED",
                 DocumentChunk.embedding_status == "PROCESSED",
-                DocumentChunk.embedding_model == model,
+                DocumentChunk.embedding_model == model_identity,
                 DocumentChunk.embedding.isnot(None),
             )
         )

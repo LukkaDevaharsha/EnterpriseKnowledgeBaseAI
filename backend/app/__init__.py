@@ -181,6 +181,12 @@ def create_app(config_overrides=None):
     app.config["EMBEDDING_MODEL_NAME"] = os.getenv(
         "EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"
     )
+    app.config["EMBEDDING_PROVIDER"] = os.getenv(
+        "EMBEDDING_PROVIDER", "sentence_transformers"
+    )
+    app.config["GEMINI_EMBEDDING_MODEL"] = os.getenv(
+        "GEMINI_EMBEDDING_MODEL", "gemini-embedding-2"
+    )
     try:
         embedding_dimension = int(os.getenv("EMBEDDING_DIMENSION", "384"))
     except ValueError as exc:
@@ -195,6 +201,18 @@ def create_app(config_overrides=None):
         "OLLAMA_BASE_URL", "http://localhost:11434"
     ).rstrip("/")
     app.config["OLLAMA_MODEL"] = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+    app.config["LLM_PROVIDER"] = os.getenv("LLM_PROVIDER", "ollama")
+    app.config["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "")
+    app.config["GEMINI_MODEL"] = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    app.config["GEMINI_TIMEOUT_SECONDS"] = float(
+        os.getenv("GEMINI_TIMEOUT_SECONDS", os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
+    )
+    app.config["EMAIL_PROVIDER"] = os.getenv("EMAIL_PROVIDER", "smtp")
+    app.config["RESEND_API_KEY"] = os.getenv("RESEND_API_KEY", "")
+    app.config["RESEND_FROM_EMAIL"] = os.getenv("RESEND_FROM_EMAIL", "")
+    app.config["RESEND_TIMEOUT_SECONDS"] = float(
+        os.getenv("RESEND_TIMEOUT_SECONDS", "10")
+    )
     app.config["SMTP_HOST"] = os.getenv("SMTP_HOST", "")
     app.config["SMTP_PORT"] = int(os.getenv("SMTP_PORT", "587"))
     app.config["SMTP_USERNAME"] = os.getenv("SMTP_USERNAME", "")
@@ -242,6 +260,28 @@ def create_app(config_overrides=None):
     if config_overrides:
         app.config.update(config_overrides)
 
+    for provider_key, supported in (
+        ("LLM_PROVIDER", {"ollama", "gemini"}),
+        ("EMBEDDING_PROVIDER", {"sentence_transformers", "gemini"}),
+        ("EMAIL_PROVIDER", {"smtp", "resend"}),
+    ):
+        selected = str(app.config.get(provider_key, "")).strip().lower()
+        if selected not in supported:
+            raise RuntimeError(f"{provider_key} must be one of: {', '.join(sorted(supported))}.")
+        app.config[provider_key] = selected
+
+    if app.config["EMBEDDING_PROVIDER"] == "gemini":
+        if "EMBEDDING_MODEL_NAME" not in (config_overrides or {}):
+            app.config["EMBEDDING_MODEL_NAME"] = app.config["GEMINI_EMBEDDING_MODEL"]
+    if not isinstance(app.config["GEMINI_TIMEOUT_SECONDS"], (int, float)) or not math.isfinite(
+        app.config["GEMINI_TIMEOUT_SECONDS"]
+    ) or app.config["GEMINI_TIMEOUT_SECONDS"] <= 0:
+        raise RuntimeError("GEMINI_TIMEOUT_SECONDS must be greater than zero.")
+    if not isinstance(app.config["RESEND_TIMEOUT_SECONDS"], (int, float)) or not math.isfinite(
+        app.config["RESEND_TIMEOUT_SECONDS"]
+    ) or app.config["RESEND_TIMEOUT_SECONDS"] <= 0:
+        raise RuntimeError("RESEND_TIMEOUT_SECONDS must be greater than zero.")
+
     for mode_model_key in (
         "GENERAL_AI_MODEL", "COMPANY_KNOWLEDGE_MODEL", "STUDY_PDF_MODEL",
     ):
@@ -250,10 +290,15 @@ def create_app(config_overrides=None):
             if config_overrides is not None
             else os.getenv(mode_model_key, "")
         )
+        default_mode_model = (
+            app.config["GEMINI_MODEL"]
+            if app.config["LLM_PROVIDER"] == "gemini"
+            else app.config["OLLAMA_MODEL"]
+        )
         app.config[mode_model_key] = (
             mode_model.strip()
             if isinstance(mode_model, str) and mode_model.strip()
-            else app.config["OLLAMA_MODEL"]
+            else default_mode_model
         )
 
     effective_environment = str(app.config.get("APP_ENV", "")).strip().lower()

@@ -60,6 +60,21 @@ def _configuration(model_name, dimension):
     return model_name.strip(), dimension
 
 
+def embedding_provider():
+    if has_app_context():
+        return current_app.config.get("EMBEDDING_PROVIDER", "sentence_transformers")
+    return "sentence_transformers"
+
+
+def embedding_model_identity(model_name=None, dimension=None):
+    """Return a persisted identity that cannot mix distinct vector spaces."""
+    model_name, dimension = _configuration(model_name, dimension)
+    provider = embedding_provider()
+    if provider == "gemini":
+        return f"gemini:{model_name}:{dimension}"
+    return model_name
+
+
 def _validate_vector(vector, dimension):
     try:
         values = [float(value) for value in vector]
@@ -82,6 +97,11 @@ def _validate_vector(vector, dimension):
 def generate_embeddings(texts, model_name=None, dimension=None):
     """Generate normalized finite vectors for a batch of non-empty texts."""
     model_name, dimension = _configuration(model_name, dimension)
+    provider = embedding_provider()
+    if provider not in {"sentence_transformers", "gemini"}:
+        raise EmbeddingError("EMBEDDING_PROVIDER must be sentence_transformers or gemini.")
+    if provider == "gemini" and dimension != DEFAULT_DIMENSION:
+        raise EmbeddingError("Gemini embeddings must use the configured 384 dimensions.")
     if isinstance(texts, str):
         texts = [texts]
     try:
@@ -93,20 +113,23 @@ def generate_embeddings(texts, model_name=None, dimension=None):
     if any(not text for text in normalized_texts):
         raise EmbeddingError("Empty or whitespace-only text cannot be embedded.")
 
-    model = _get_model(model_name)
-    try:
-        output = model.encode(
-            normalized_texts,
-            batch_size=32,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        )
-    except Exception as exc:
-        raise EmbeddingError("Embedding model inference failed.") from exc
+    if provider == "gemini":
+        outputs = _generate_gemini_embeddings(normalized_texts, model_name, dimension)
+    else:
+        model = _get_model(model_name)
+        try:
+            outputs = model.encode(
+                normalized_texts,
+                batch_size=32,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            )
+        except Exception as exc:
+            raise EmbeddingError("Embedding model inference failed.") from exc
 
     try:
-        vectors = output.tolist() if hasattr(output, "tolist") else list(output)
+        vectors = outputs.tolist() if hasattr(outputs, "tolist") else list(outputs)
         if len(normalized_texts) == 1 and vectors and isinstance(vectors[0], (int, float)):
             vectors = [vectors]
         if len(vectors) != len(normalized_texts):
@@ -116,4 +139,35 @@ def generate_embeddings(texts, model_name=None, dimension=None):
         raise
     except Exception as exc:
         raise EmbeddingError("The embedding model returned an invalid result.") from exc
+
+
+def _generate_gemini_embeddings(texts, model_name, dimension):
+    try:
+        from app.services.gemini_client import get_gemini_client
+
+        client = get_gemini_client()
+        vectors = []
+        for offset in range(0, len(texts), 32):
+            batch = texts[offset:offset + 32]
+            response = client.models.embed_content(
+                model=model_name,
+                contents=batch,
+                config={"output_dimensionality": dimension},
+            )
+            embeddings = getattr(response, "embeddings", None)
+            if not isinstance(embeddings, (list, tuple)):
+                raise EmbeddingError("Gemini returned an invalid embedding response.")
+            for embedding in embeddings:
+                values = (
+                    embedding.get("values") if isinstance(embedding, dict)
+                    else getattr(embedding, "values", None)
+                )
+                vectors.append(values)
+        if len(vectors) != len(texts):
+            raise EmbeddingError("The embedding model returned an unexpected batch size.")
+        return vectors
+    except EmbeddingError:
+        raise
+    except Exception:
+        raise EmbeddingError("Gemini embedding request failed.") from None
 

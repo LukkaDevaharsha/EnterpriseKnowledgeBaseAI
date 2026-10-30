@@ -48,6 +48,11 @@ def app():
             {
                 "SQLALCHEMY_DATABASE_URI": _test_database_uri(),
                 "TESTING": True,
+                # Keep regression fixtures deterministic even when developer
+                # or deployment provider variables are present in the shell.
+                "LLM_PROVIDER": "ollama",
+                "EMBEDDING_PROVIDER": "sentence_transformers",
+                "EMAIL_PROVIDER": "smtp",
                 "DOCUMENT_STORAGE_PATH": storage_dir,
                 # Allow multipart overhead while testing the 10 MB
                 # individual-file limit.
@@ -128,3 +133,15 @@ def clean_database(app, clean_storage):
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture(autouse=True)
+def reset_cloud_provider_selection(app):
+    """Prevent deployment shell settings from changing legacy regression tests."""
+    defaults = {
+        "LLM_PROVIDER": "ollama",
+        "EMBEDDING_PROVIDER": "sentence_transformers",
+        "EMAIL_PROVIDER": "smtp",
+    }
+    app.config.update(defaults)
+    yield

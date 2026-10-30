@@ -7,7 +7,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app import db
 from app.models import DocumentChunk
-from app.services.embedding_service import EmbeddingError, generate_embeddings
+from app.services.embedding_service import (
+    EmbeddingError, embedding_model_identity, generate_embeddings,
+)
 
 
 def _content_hash(content):
@@ -31,6 +33,9 @@ def process_document_embeddings(document_id, allow_model_change=False):
     implicit model switching; callers must use the explicit re-embedding path.
     """
     model_name = current_app.config["EMBEDDING_MODEL_NAME"]
+    model_identity = embedding_model_identity(
+        model_name, current_app.config["EMBEDDING_DIMENSION"]
+    )
     try:
         chunks = (
             DocumentChunk.query.filter_by(document_id=document_id)
@@ -53,7 +58,7 @@ def process_document_embeddings(document_id, allow_model_change=False):
     if not chunks:
         return False
 
-    incompatible = all_model_ids - {model_name}
+    incompatible = all_model_ids - {model_identity}
     if incompatible and not allow_model_change:
         current_app.logger.error(
             "Embedding model change blocked. Existing embeddings use another model; "
@@ -61,7 +66,7 @@ def process_document_embeddings(document_id, allow_model_change=False):
         )
         return False
 
-    needing = [chunk for chunk in chunks if _needs_embedding(chunk, model_name)]
+    needing = [chunk for chunk in chunks if _needs_embedding(chunk, model_identity)]
     if not needing:
         return True
 
@@ -87,7 +92,7 @@ def process_document_embeddings(document_id, allow_model_change=False):
         # until every replacement vector has been generated successfully.
         for chunk, vector in zip(needing, vectors):
             chunk.embedding = vector
-            chunk.embedding_model = model_name
+            chunk.embedding_model = model_identity
             chunk.embedding_content_hash = _content_hash(chunk.content)
             chunk.embedding_status = "PROCESSED"
         db.session.commit()
