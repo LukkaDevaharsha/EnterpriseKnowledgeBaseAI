@@ -163,6 +163,19 @@ def create_app(config_overrides=None):
     app.config["DOCUMENT_STORAGE_PATH"] = (
         os.getenv("DOCUMENT_STORAGE_PATH") or default_storage_path
     )
+    app.config.update({
+        "STORAGE_BACKEND": os.getenv("STORAGE_BACKEND", "local").strip().lower(),
+        "S3_ENDPOINT_URL": os.getenv(
+            "S3_ENDPOINT_URL",
+            "https://ixkkqeyzopkbdcfnzwye.storage.supabase.co/storage/v1/s3",
+        ).strip(),
+        "S3_REGION": os.getenv("S3_REGION", "ap-southeast-1").strip(),
+        "S3_BUCKET": os.getenv(
+            "S3_BUCKET", "enterprise-knowledge-base-docs"
+        ).strip(),
+        "S3_ACCESS_KEY_ID": os.getenv("S3_ACCESS_KEY_ID", ""),
+        "S3_SECRET_ACCESS_KEY": os.getenv("S3_SECRET_ACCESS_KEY", ""),
+    })
 
     app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
     app.config["EMBEDDING_MODEL_NAME"] = os.getenv(
@@ -254,6 +267,23 @@ def create_app(config_overrides=None):
             "JWT_SECRET_KEY must contain at least 32 bytes in production."
         )
 
+    storage_backend = str(app.config.get("STORAGE_BACKEND", "local")).strip().lower()
+    if storage_backend not in {"local", "supabase_s3"}:
+        raise RuntimeError("STORAGE_BACKEND must be local or supabase_s3.")
+    app.config["STORAGE_BACKEND"] = storage_backend
+
+    if storage_backend == "supabase_s3":
+        s3_endpoint = app.config["S3_ENDPOINT_URL"]
+        parsed_endpoint = urlparse(s3_endpoint)
+        if (parsed_endpoint.scheme != "https" or not parsed_endpoint.hostname
+                or parsed_endpoint.username is not None or parsed_endpoint.password is not None
+                or parsed_endpoint.query or parsed_endpoint.fragment):
+            raise RuntimeError("S3_ENDPOINT_URL must be a valid HTTPS endpoint.")
+        if not app.config["S3_REGION"] or not app.config["S3_BUCKET"]:
+            raise RuntimeError("S3_REGION and S3_BUCKET must be configured.")
+        if not app.config["S3_ACCESS_KEY_ID"] or not app.config["S3_SECRET_ACCESS_KEY"]:
+            raise RuntimeError("S3 access credentials must be configured.")
+
     configured_storage_path = app.config.get("DOCUMENT_STORAGE_PATH")
     explicit_storage_path = (
         bool(os.getenv("DOCUMENT_STORAGE_PATH", "").strip())
@@ -262,18 +292,19 @@ def create_app(config_overrides=None):
             and str(config_overrides.get("DOCUMENT_STORAGE_PATH", "")).strip()
         )
     )
-    if production_mode and not explicit_storage_path:
+    if storage_backend == "local" and production_mode and not explicit_storage_path:
         raise RuntimeError(
             "DOCUMENT_STORAGE_PATH must be explicitly configured in production."
         )
-    if not isinstance(configured_storage_path, (str, os.PathLike)) or not str(
-        configured_storage_path
-    ).strip():
-        raise RuntimeError("DOCUMENT_STORAGE_PATH must be a non-empty directory path.")
-    app.config["DOCUMENT_STORAGE_PATH"] = os.path.abspath(
-        os.fspath(configured_storage_path)
-    )
-    _validate_document_storage(app.config["DOCUMENT_STORAGE_PATH"])
+    if storage_backend == "local":
+        if not isinstance(configured_storage_path, (str, os.PathLike)) or not str(
+            configured_storage_path
+        ).strip():
+            raise RuntimeError("DOCUMENT_STORAGE_PATH must be a non-empty directory path.")
+        app.config["DOCUMENT_STORAGE_PATH"] = os.path.abspath(
+            os.fspath(configured_storage_path)
+        )
+        _validate_document_storage(app.config["DOCUMENT_STORAGE_PATH"])
 
     cors_origins = _parse_cors_origins(
         os.getenv("CORS_ALLOWED_ORIGINS", ""), production=production_mode

@@ -1,12 +1,10 @@
 """Admin-only account and shared-knowledge APIs."""
 
-import os
 import re
-import uuid
 from io import BytesIO
 
 import pymupdf
-from flask import Blueprint, current_app, jsonify, request, send_file, send_from_directory
+from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,6 +18,7 @@ from app.services.embedding_service import EmbeddingError
 from app.services.ollama_client import OllamaError
 from app.services.rag_service import RagValidationError, answer_question, validate_question
 from app.services.semantic_search import SearchDatabaseError
+from app.services.storage import StorageError, get_storage
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 shared_bp = Blueprint("shared_documents", __name__, url_prefix="/api/study/documents")
@@ -244,33 +243,21 @@ def inspect_document(document_id):
 
 
 def _delete_document(document, actor):
-    path = os.path.join(current_app.config["DOCUMENT_STORAGE_PATH"], document.stored_filename)
-    tombstone = os.path.join(current_app.config["DOCUMENT_STORAGE_PATH"], f".deleting-{uuid.uuid4()}")
-    staged = False
     try:
-        if os.path.isfile(path):
-            os.replace(path, tombstone)
-            staged = True
         DocumentChunk.query.filter_by(document_id=document.id).delete(synchronize_session=False)
         record_admin_action(actor.id, "shared_document.delete", "document", document.id,
                             {"title": document.title})
         db.session.delete(document)
         db.session.commit()
-    except (OSError, SQLAlchemyError):
+    except SQLAlchemyError:
         db.session.rollback()
-        if staged:
-            try:
-                os.replace(tombstone, path)
-            except OSError:
-                current_app.logger.exception("Document delete rollback could not restore the file.")
         current_app.logger.exception("Shared document deletion failed.")
         return _error("Document deletion failed; the document record was retained.", 500)
-    if staged:
-        try:
-            os.remove(tombstone)
-        except OSError:
-            current_app.logger.exception("Deleted document has a staged file requiring cleanup.")
-            return jsonify({"status": "success", "message": "Document deleted; staged file cleanup requires operator attention."}), 200
+    try:
+        get_storage().delete(document.stored_filename)
+    except (StorageError, OSError):
+        current_app.logger.error("Deleted document object requires storage cleanup.")
+        return jsonify({"status": "success", "message": "Document deleted; stored file cleanup requires operator attention."}), 200
     return jsonify({"status": "success", "message": "Document deleted successfully."}), 200
 
 
@@ -318,11 +305,15 @@ def download_study_document(document_id):
     doc = _protected_document(document_id, user=user)
     if doc is None:
         return _error("Study document not found.", 404)
-    path = current_app.config["DOCUMENT_STORAGE_PATH"]
-    if not os.path.isfile(os.path.join(path, doc.stored_filename)):
+    try:
+        content = get_storage().read(doc.stored_filename)
+    except FileNotFoundError:
         return _error("Document file is missing from storage.", 404)
-    response = send_from_directory(path, doc.stored_filename, as_attachment=False,
-                                   download_name=doc.original_filename, mimetype="application/octet-stream")
+    except StorageError:
+        return _error("Document storage is unavailable.", 503)
+    response = send_file(BytesIO(content), as_attachment=False,
+                         download_name=doc.original_filename,
+                         mimetype="application/octet-stream")
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -341,12 +332,15 @@ def study_document_pages(document_id):
     document = _protected_document(document_id, user=user)
     if document is None:
         return _error("Study document not found.", 404)
-    path = os.path.join(current_app.config["DOCUMENT_STORAGE_PATH"], document.stored_filename)
-    if not os.path.isfile(path):
-        return _error("Document file is missing from storage.", 404)
     try:
-        pages = extract_document_pages(path, document.file_type)
-        outline = extract_pdf_outline(path) if document.file_type == "PDF" else []
+        content = get_storage().read(document.stored_filename)
+    except FileNotFoundError:
+        return _error("Document file is missing from storage.", 404)
+    except StorageError:
+        return _error("Document storage is unavailable.", 503)
+    try:
+        pages = extract_document_pages(content, document.file_type)
+        outline = extract_pdf_outline(content) if document.file_type == "PDF" else []
     except ValueError:
         return _error("Document text could not be extracted.", 422)
     return jsonify({
@@ -382,12 +376,8 @@ def render_study_document_page(document_id, page_number):
     if not 0.75 <= scale <= 3:
         return _error("scale must be a number between 0.75 and 3.", 400)
 
-    path = os.path.join(current_app.config["DOCUMENT_STORAGE_PATH"], document.stored_filename)
-    if not os.path.isfile(path):
-        return _error("Document file is missing from storage.", 404)
     try:
-        with open(path, "rb") as file:
-            pdf_bytes = file.read()
+        pdf_bytes = get_storage().read(document.stored_filename)
         with pymupdf.open(stream=pdf_bytes, filetype="pdf") as pdf:
             if page_number > pdf.page_count:
                 return _error("PDF page not found.", 404)
@@ -406,6 +396,10 @@ def render_study_document_page(document_id, page_number):
                     highlight.update()
             image = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
             image_bytes = image.tobytes("png")
+    except FileNotFoundError:
+        return _error("Document file is missing from storage.", 404)
+    except StorageError:
+        return _error("Document storage is unavailable.", 503)
     except (OSError, pymupdf.FileDataError, pymupdf.FileNotFoundError,
             pymupdf.EmptyFileError, RuntimeError, ValueError):
         return _error("PDF page could not be rendered.", 422)

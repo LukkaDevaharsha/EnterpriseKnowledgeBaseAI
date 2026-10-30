@@ -1,12 +1,12 @@
-import os
 import uuid
+from io import BytesIO
 
 from flask import (
     Blueprint,
     current_app,
     jsonify,
     request,
-    send_from_directory,
+    send_file,
 )
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,6 +17,7 @@ from app.models import Document, DocumentChunk, User
 from app.services.document_processor import extract_document_pages
 from app.services.text_chunker import split_text
 from app.services.chunk_embedding_pipeline import process_document_embeddings
+from app.services.storage import StorageError, get_storage
 
 
 documents_bp = Blueprint(
@@ -51,9 +52,8 @@ def get_active_user():
 
 
 def storage_directory():
-    path = current_app.config["DOCUMENT_STORAGE_PATH"]
-    os.makedirs(path, exist_ok=True)
-    return path
+    """Compatibility seam for tests and the configured storage adapter."""
+    return get_storage()
 
 
 @documents_bp.post("")
@@ -116,11 +116,11 @@ def upload_document():
 
     stored_filename = str(uuid.uuid4())
     try:
-        path = storage_directory()
-    except OSError:
-        current_app.logger.error("Document storage directory is unavailable.")
+        storage = storage_directory()
+        storage.upload(stored_filename, content)
+    except (StorageError, OSError):
+        current_app.logger.error("Document storage operation failed.")
         return error("Document storage is unavailable.", 503)
-    saved_path = os.path.join(path, stored_filename)
 
     document = Document(
         title=title,
@@ -134,16 +134,13 @@ def upload_document():
     )
 
     try:
-        with open(saved_path, "xb") as file:
-            file.write(content)
-
         document.status = "PROCESSING"
 
         db.session.add(document)
         db.session.flush()
 
         try:
-            pages = extract_document_pages(saved_path, file_type)
+            pages = extract_document_pages(content, file_type)
             extracted_text = "\n".join(text for _, text in pages).strip()
             chunks = []
             source_offset = 0
@@ -180,25 +177,12 @@ def upload_document():
 
         db.session.commit()
 
-    except OSError:
-        db.session.rollback()
-
-        try:
-            if os.path.exists(saved_path):
-                os.remove(saved_path)
-        except OSError:
-            current_app.logger.error("Could not clean up a failed document upload.")
-
-        current_app.logger.error("Document storage operation failed.")
-        return error("Document storage is unavailable.", 503)
-
     except SQLAlchemyError:
         db.session.rollback()
 
         try:
-            if os.path.exists(saved_path):
-                os.remove(saved_path)
-        except OSError:
+            storage.delete(stored_filename)
+        except (StorageError, OSError):
             current_app.logger.error("Could not clean up a failed document upload.")
 
         current_app.logger.exception(
@@ -301,15 +285,16 @@ def download_document(document_id):
     if document is None:
         return error("Document not found.", 404)
 
-    path = current_app.config["DOCUMENT_STORAGE_PATH"]
-    stored_path = os.path.join(path, document.stored_filename)
-
-    if not os.path.isfile(stored_path):
+    storage = storage_directory()
+    try:
+        content = storage.read(document.stored_filename)
+    except FileNotFoundError:
         return error("Document file is missing from storage.", 404)
+    except StorageError:
+        return error("Document storage is unavailable.", 503)
 
-    response = send_from_directory(
-        path,
-        document.stored_filename,
+    response = send_file(
+        BytesIO(content),
         as_attachment=True,
         download_name=document.original_filename,
     )
@@ -336,11 +321,6 @@ def delete_document(document_id):
     if document is None:
         return error("Document not found.", 404)
 
-    saved_path = os.path.join(
-        current_app.config["DOCUMENT_STORAGE_PATH"],
-        document.stored_filename,
-    )
-
     try:
         DocumentChunk.query.filter_by(document_id=document.id).delete(
             synchronize_session=False
@@ -358,10 +338,8 @@ def delete_document(document_id):
         return error("Document deletion failed.", 500)
 
     try:
-        if os.path.isfile(saved_path):
-            os.remove(saved_path)
-
-    except OSError:
+        storage_directory().delete(document.stored_filename)
+    except (StorageError, OSError):
         current_app.logger.exception(
             "Database record deleted, but the stored file "
             "could not be removed."

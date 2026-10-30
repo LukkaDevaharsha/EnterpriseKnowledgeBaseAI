@@ -1,6 +1,5 @@
 """Shared validated upload/index workflow used by employee and admin routes."""
 
-import os
 import uuid
 
 from flask import current_app
@@ -12,6 +11,7 @@ from app.models import AuditEvent, Document, DocumentChunk
 from app.services.chunk_embedding_pipeline import process_document_embeddings
 from app.services.document_processor import extract_document_pages
 from app.services.text_chunker import split_text
+from app.services.storage import StorageError, get_storage
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "md", "pptx", "csv", "xlsx"}
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -41,38 +41,24 @@ def create_document_upload(uploaded_file, user, title="", is_shared=False):
     if len(content) > MAX_FILE_SIZE:
         raise DocumentUploadError("File size must not exceed 10 MB.", 413)
     file_type = extension.upper()
-    # Verify the actual bytes before writing to storage, including OOXML ZIP structure.
-    import tempfile
+    # Validate the content directly; temporary filesystem copies are unnecessary.
     try:
-        with tempfile.NamedTemporaryFile(suffix=f".{extension}", delete=False) as probe:
-            probe.write(content)
-            probe_path = probe.name
-        extract_document_pages(probe_path, file_type)
+        pages = extract_document_pages(content, file_type)
     except ValueError as exc:
         raise DocumentUploadError(str(exc), 400) from exc
-    finally:
-        if 'probe_path' in locals():
-            try:
-                os.remove(probe_path)
-            except OSError:
-                pass
 
-    storage = current_app.config["DOCUMENT_STORAGE_PATH"]
     stored_filename = str(uuid.uuid4())
-    saved_path = os.path.join(storage, stored_filename)
     document = Document(
         title=title, original_filename=filename, stored_filename=stored_filename,
         file_type=file_type, file_size=len(content), status="PROCESSING",
         uploaded_by=user.id, is_shared=bool(is_shared),
     )
     try:
-        with open(saved_path, "xb") as output:
-            output.write(content)
-    except OSError as exc:
+        get_storage().upload(stored_filename, content)
+    except (StorageError, OSError) as exc:
         raise DocumentUploadError("Document storage is unavailable.", 503) from exc
 
     try:
-        pages = extract_document_pages(saved_path, file_type)
         extracted_text = "\n".join(text for _, text in pages).strip()
         chunks = []
         source_offset = 0
@@ -119,17 +105,17 @@ def create_document_upload(uploaded_file, user, title="", is_shared=False):
         except SQLAlchemyError as db_error:
             db.session.rollback()
             try:
-                os.remove(saved_path)
-            except OSError:
+                get_storage().delete(stored_filename)
+            except (StorageError, OSError):
                 current_app.logger.error("Failed upload cleanup requires operator attention.")
             raise DocumentUploadError("Document processing failed.", 500) from db_error
     except (OSError, SQLAlchemyError) as exc:
         db.session.rollback()
         try:
-            os.remove(saved_path)
-        except OSError:
+            get_storage().delete(stored_filename)
+        except (StorageError, OSError):
             current_app.logger.error("Failed upload cleanup requires operator attention.")
-        if isinstance(exc, OSError):
+        if isinstance(exc, (StorageError, OSError)):
             raise DocumentUploadError("Document storage is unavailable.", 503) from exc
         current_app.logger.exception("Document upload persistence failed.")
         raise DocumentUploadError("Document upload failed.", 500) from exc

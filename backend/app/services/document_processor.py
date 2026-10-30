@@ -13,6 +13,8 @@ MAX_ROWS = 20000
 
 
 def _read(path):
+    if isinstance(path, (bytes, bytearray, memoryview)):
+        return bytes(path)
     with open(path, "rb") as file:
         return file.read()
 
