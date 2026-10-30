@@ -1,7 +1,9 @@
 """Small synchronous client for Ollama's local chat HTTP endpoint."""
 
 import json
+import re
 import socket
+from urllib.parse import quote
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -101,6 +103,10 @@ def _generate_gemini_answer(question, evidence_json, system_prompt, model=None):
     """Call the official Gemini SDK without exposing provider diagnostics."""
     model = model or current_app.config.get("GEMINI_MODEL", "")
     if not model:
+        _log_gemini_failure(
+            RuntimeError("Gemini model is not configured."), model,
+            question, evidence_json, system_prompt,
+        )
         raise OllamaModelError("A Gemini model must be configured.")
 
     prompt = (
@@ -123,17 +129,155 @@ def _generate_gemini_answer(question, evidence_json, system_prompt, model=None):
             },
         )
     except Exception as exc:
-        code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-        name = type(exc).__name__.lower()
-        if code == 404:
+        status_code = _gemini_http_status(exc)
+        _log_gemini_failure(
+            exc, model, question, evidence_json, system_prompt,
+            http_status=status_code,
+        )
+        if status_code == 404:
             raise OllamaModelError("The configured language model is unavailable.") from None
-        if "timeout" in name or isinstance(exc, (TimeoutError, socket.timeout)):
+        if _is_timeout_error(exc):
             raise OllamaUnavailableError("The language model request timed out.") from None
-        if code == 429:
+        if status_code == 429:
             raise OllamaUnavailableError("The language model provider is rate limited.") from None
         raise OllamaUnavailableError("The language model provider is unavailable.") from None
 
     content = getattr(response, "text", None)
     if not isinstance(content, str) or not content.strip():
+        _log_gemini_response_error(model)
         raise OllamaError("The language model returned no answer content.")
     return content.strip()
+
+
+def _is_timeout_error(exc):
+    current = exc
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (TimeoutError, socket.timeout)) or "timeout" in type(current).__name__.lower():
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _gemini_http_status(exc):
+    for value in (
+        getattr(exc, "code", None),
+        getattr(exc, "status_code", None),
+        getattr(getattr(exc, "resp", None), "status", None),
+        getattr(getattr(exc, "response", None), "status_code", None),
+    ):
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _gemini_provider_code(exc):
+    value = getattr(exc, "status", None)
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", value):
+        return value
+    response_json = getattr(exc, "response_json", None)
+    error = response_json.get("error") if isinstance(response_json, dict) else None
+    value = error.get("status") if isinstance(error, dict) else None
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", value):
+        return value
+    return None
+
+
+def _safe_gemini_provider_message(exc, sensitive_values, request_values=()):
+    if _is_timeout_error(exc):
+        message = "Gemini request timed out."
+    else:
+        message = getattr(exc, "message", None)
+        if not isinstance(message, str):
+            response_json = getattr(exc, "response_json", None)
+            error = response_json.get("error") if isinstance(response_json, dict) else None
+            message = error.get("message") if isinstance(error, dict) else None
+        if not isinstance(message, str) or not message.strip():
+            if isinstance(exc, RuntimeError) and "GEMINI_API_KEY" in str(exc):
+                message = "GEMINI_API_KEY is not configured."
+            elif isinstance(exc, RuntimeError) and "Gemini SDK dependencies" in str(exc):
+                message = "Google GenAI SDK dependencies are unavailable."
+            else:
+                message = "Gemini returned an error without a safe message."
+
+    for value in sensitive_values:
+        if not isinstance(value, str) or len(value) < 4:
+            continue
+        for representation in {value, quote(value, safe="")}:
+            message = message.replace(representation, "[redacted]")
+    message = re.sub(r"(?i)(AIza[0-9a-z_-]{20,})", "[redacted]", message)
+    message = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+", r"\1[redacted]", message)
+    message = re.sub(r"[\r\n\t]+", " ", message).strip()
+    if _contains_request_overlap(message, request_values):
+        return "Provider message withheld because it overlapped request content."
+    return message[:300]
+
+
+def _gemini_sensitive_values(question, evidence_json, system_prompt):
+    values = [question, evidence_json, system_prompt]
+    config = current_app.config
+    values.extend(
+        value for key, value in config.items()
+        if any(marker in key.upper() for marker in ("KEY", "SECRET", "TOKEN", "PASSWORD"))
+        and isinstance(value, str)
+    )
+    return values
+
+
+def _log_gemini_failure(
+    exc, model, question, evidence_json, system_prompt, http_status=None
+):
+    config = current_app.config
+    api_key = config.get("GEMINI_API_KEY", "")
+    sensitive_values = _gemini_sensitive_values(question, evidence_json, system_prompt)
+    provider_message = _safe_gemini_provider_message(
+        exc,
+        sensitive_values,
+        request_values=(question, evidence_json, system_prompt),
+    )
+    current_app.logger.warning(
+        "Gemini generation failed provider=%s model=%s exception_class=%s "
+        "http_status=%s provider_error_code=%s api_key_configured=%s "
+        "provider_message=%s",
+        "gemini",
+        _safe_gemini_model(model),
+        type(exc).__name__,
+        http_status if http_status is not None else _gemini_http_status(exc),
+        _gemini_provider_code(exc),
+        bool(isinstance(api_key, str) and api_key.strip()),
+        provider_message,
+    )
+
+
+def _log_gemini_response_error(model):
+    api_key = current_app.config.get("GEMINI_API_KEY", "")
+    current_app.logger.warning(
+        "Gemini generation failed provider=%s model=%s exception_class=%s "
+        "http_status=%s provider_error_code=%s api_key_configured=%s "
+        "provider_message=%s",
+        "gemini", _safe_gemini_model(model), "InvalidGeminiResponse", None, None,
+        bool(isinstance(api_key, str) and api_key.strip()),
+        "Gemini returned no usable text content.",
+    )
+
+
+def _safe_gemini_model(model):
+    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", model):
+        return "<invalid-or-unset>"
+    return model
+
+
+def _contains_request_overlap(message, request_values):
+    message_words = set(re.findall(r"[a-z0-9]+", message.lower()))
+    if len(message_words) < 5:
+        return False
+    for value in request_values:
+        if not isinstance(value, str):
+            continue
+        words = re.findall(r"[a-z0-9]+", value.lower())
+        for index in range(max(0, len(words) - 4)):
+            window = words[index:index + 5]
+            if len(" ".join(window)) >= 24 and all(word in message_words for word in window):
+                return True
+    return False
