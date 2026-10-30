@@ -2,7 +2,7 @@ import os
 import math
 import tempfile
 from datetime import timedelta
-from urllib.parse import quote, urlsplit, urlparse
+from urllib.parse import urlsplit, urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify
@@ -10,6 +10,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.engine import URL
 import click
 
 
@@ -135,15 +136,21 @@ def create_app(config_overrides=None):
         minutes=token_expiration_minutes
     )
 
-    db_user = quote(os.getenv("DB_USER", "postgres"), safe="")
-    db_password = quote(os.getenv("DB_PASSWORD", ""), safe="")
+    db_user = os.getenv("DB_USER", "postgres")
+    db_password = os.getenv("DB_PASSWORD", "")
     db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "5432")
+    db_port = int(os.getenv("DB_PORT", "5432"))
     db_name = os.getenv("DB_NAME", "enterprise_knowledge_base")
-
-    app.config["SQLALCHEMY_DATABASE_URI"] = (
-        f"postgresql+psycopg://{db_user}:{db_password}"
-        f"@{db_host}:{db_port}/{db_name}"
+    db_sslmode = os.getenv("DB_SSLMODE", "").strip()
+    database_url_options = {"query": {"sslmode": db_sslmode}} if db_sslmode else {}
+    app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
+        drivername="postgresql+psycopg",
+        username=db_user,
+        password=db_password,
+        host=db_host,
+        port=db_port,
+        database=db_name,
+        **database_url_options,
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 

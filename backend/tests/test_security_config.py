@@ -5,6 +5,44 @@ from app import create_app
 from app.utils.database_url import render_database_url
 
 
+def _database_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("JWT_SECRET_KEY", "database-config-test-key")
+    monkeypatch.setenv("DOCUMENT_STORAGE_PATH", str(tmp_path / "database-files"))
+    monkeypatch.setenv("DB_USER", "pooler_user")
+    monkeypatch.setenv("DB_PASSWORD", "private-test-password")
+    monkeypatch.setenv("DB_HOST", "db.example")
+    monkeypatch.setenv("DB_PORT", "6543")
+    monkeypatch.setenv("DB_NAME", "knowledge")
+    return make_url(create_app({"TESTING": True}).config["SQLALCHEMY_DATABASE_URI"])
+
+
+def test_database_url_supports_required_sslmode(monkeypatch, tmp_path):
+    monkeypatch.setenv("DB_SSLMODE", "require")
+
+    url = _database_config(monkeypatch, tmp_path)
+
+    assert url.drivername == "postgresql+psycopg"
+    assert url.username == "pooler_user"
+    assert url.password == "private-test-password"
+    assert url.host == "db.example"
+    assert url.port == 6543
+    assert url.database == "knowledge"
+    assert url.query == {"sslmode": "require"}
+    assert "private-test-password" not in render_database_url(url)
+
+
+def test_database_url_without_sslmode_preserves_local_defaults(monkeypatch, tmp_path):
+    monkeypatch.delenv("DB_SSLMODE", raising=False)
+
+    url = _database_config(monkeypatch, tmp_path)
+
+    assert url.query == {}
+    assert url.host == "db.example"
+    assert url.port == 6543
+    assert url.database == "knowledge"
+
+
 def test_database_url_rendering_masks_password_and_preserves_other_parts():
     url = make_url(
         "postgresql+psycopg://audit_user:never-print-this@db.example:5432/knowledge"
