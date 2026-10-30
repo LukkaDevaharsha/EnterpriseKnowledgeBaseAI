@@ -79,7 +79,7 @@ function BrowseTab() {
   function chooseFile(e) {
     const f = e.target.files?.[0] || null
     setError(''); setNotice('')
-    if (f && !/\.(pdf|txt)$/i.test(f.name)) { setFile(null); e.target.value = ''; setError('Choose a PDF or TXT file.'); return }
+    if (f && !/\.(pdf|docx|txt|md|pptx|csv|xlsx)$/i.test(f.name)) { setFile(null); e.target.value = ''; setError('Choose a PDF, DOCX, TXT, MD, PPTX, CSV, or XLSX file.'); return }
     if (f && f.size === 0) { setFile(null); e.target.value = ''; setError('The selected file is empty.'); return }
     if (f && f.size > MAX_FILE_SIZE) { setFile(null); e.target.value = ''; setError('Files must be 10 MB or smaller.'); return }
     setFile(f)
@@ -165,7 +165,7 @@ function BrowseTab() {
       <section className="upload-section">
         <div className="upload-section-heading">
           <div><span className="section-label">ADD TO YOUR LIBRARY</span><h2>Upload a document</h2></div>
-          <span className="upload-constraints">PDF or TXT · up to 10 MB</span>
+          <span className="upload-constraints">PDF, DOCX, TXT, MD, PPTX, CSV, or XLSX · up to 10 MB</span>
         </div>
         <form className="upload-form" onSubmit={upload}>
           <label className="form-field" htmlFor="doc-title">
@@ -174,7 +174,7 @@ function BrowseTab() {
               onChange={(e) => setTitle(e.target.value)} placeholder="Defaults to the file name" />
           </label>
           <div className="file-row">
-            <input ref={inputRef} id="doc-file" type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={chooseFile} />
+            <input ref={inputRef} id="doc-file" type="file" accept=".pdf,.docx,.txt,.md,.pptx,.csv,.xlsx,application/pdf,text/plain" onChange={chooseFile} />
             <span className="file-name">{file ? `${file.name} · ${fmt(file.size)}` : 'No file selected'}</span>
             <button className="button button-primary" disabled={busy || !file}>
               {busy ? 'Processing…' : 'Upload'}
@@ -218,7 +218,7 @@ function BrowseTab() {
         {loading
           ? <PageLoading label="Loading documents…" />
           : documents.length === 0
-            ? <EmptyState title="No documents yet" action={<label htmlFor="doc-file" className="button button-primary button-small">Choose a file</label>}>Upload a PDF or TXT file above to start building your knowledge library.</EmptyState>
+            ? <EmptyState title="No documents yet" action={<label htmlFor="doc-file" className="button button-primary button-small">Choose a file</label>}>Upload a supported document above to start building your knowledge library.</EmptyState>
             : visible.length === 0
               ? <EmptyState title="No documents match your search">Clear the search or change the status filter.</EmptyState>
               : (

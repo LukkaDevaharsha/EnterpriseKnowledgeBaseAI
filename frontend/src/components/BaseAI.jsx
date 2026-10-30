@@ -153,7 +153,7 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
         {response.citations.map((citation) => <article className="citation-card" key={citation.source_id}>
           <span className="citation-marker">[{citation.source_id}]</span>
           <div className="citation-content"><strong>{citation.document_title}</strong>
-            <small>Chunk {citation.chunk_index + 1}{citation.page_number ? ` · page ${citation.page_number}` : ''}</small>
+            <small>{citation.source_reference || `Chunk ${citation.chunk_index + 1}`}</small>
             {citation.excerpt && <p>{citation.excerpt}</p>}
           </div>
         </article>)}

@@ -102,11 +102,41 @@ def _build_evidence(results, max_chars):
             "source_id": source_id,
             "document_id": result["document_id"],
             "document_title": result["document_title"],
+            "document_type": result.get("document_type", "PDF"),
             "chunk_id": result["chunk_id"],
             "chunk_index": result["chunk_index"],
+            "source_reference": _source_reference(result),
             "excerpt": entry["excerpt"][:500],
         }
     return serialized, citations
+
+
+def _source_reference(result):
+    """Describe a source using labels present in the extracted passage."""
+    kind = result.get("document_type", "PDF")
+    content = result.get("content", "")
+    index = result.get("chunk_index", 0) + 1
+    if kind == "PDF":
+        return f"Text passage {index}"
+    if kind == "PPTX":
+        match = re.search(r"Slide (\d+):", content)
+        return f"Slide {match.group(1)}" if match else f"Slide passage {index}"
+    if kind == "DOCX":
+        match = re.search(r"Heading: ([^\n]+)|([^\n]+) — ", content)
+        return f"Heading: {next(value for value in match.groups() if value)}" if match else f"Paragraph passage {index}"
+    if kind == "MD":
+        match = re.search(r"^#{1,6}\s+(.+)$", content, re.MULTILINE)
+        return f"Section: {match.group(1)}" if match else f"Text passage {index}"
+    if kind in {"CSV", "XLSX"}:
+        row = re.search(r"Row (\d+):", content)
+        sheet = re.search(r"Worksheet: ([^\n]+)", content)
+        details = [f"Worksheet {sheet.group(1)}"] if sheet else []
+        if row:
+            details.append(f"row {row.group(1)}")
+        return ", ".join(details) if details else f"Table passage {index}"
+    if kind == "TXT":
+        return f"Characters {result.get('start_char', 0)}–{result.get('end_char', 0)}"
+    return f"Passage {index}"
 
 
 def _clean_answer(answer, citations):
@@ -126,7 +156,7 @@ def _clean_answer(answer, citations):
     return answer, valid_citations, False
 
 
-def answer_question(question, user_id, top_k=None):
+def answer_question(question, user_id, top_k=None, document_id=None):
     """Retrieve authorized evidence, then generate a cited answer with Ollama."""
     question = validate_question(question)
     if top_k is None:
@@ -135,7 +165,7 @@ def answer_question(question, user_id, top_k=None):
 
     # semantic_search performs the document ownership filter in SQL before
     # returning chunk text. Only those returned records are sent to Ollama.
-    results = search_chunks(question, user_id, top_k)
+    results = search_chunks(question, user_id, top_k, document_id=document_id)
     threshold = current_app.config["RAG_MIN_SIMILARITY"]
     relevant = [
         result for result in results

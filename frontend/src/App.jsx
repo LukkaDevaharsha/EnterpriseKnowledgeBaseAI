@@ -17,7 +17,7 @@ const PAGE_TITLES = {
   '/': 'Home',
   '/library': 'Knowledge Library',
   '/ask': 'Ask BaseAI',
-  '/study': 'Study PDFs',
+  '/study': 'Study Documents',
   '/admin': 'Administration',
 }
 

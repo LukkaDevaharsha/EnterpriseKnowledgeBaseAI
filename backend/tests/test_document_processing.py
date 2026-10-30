@@ -99,6 +99,35 @@ def test_txt_upload_extracts_text(
         assert len(chunks[0].embedding) == 384
 
 
+def test_markdown_upload_processes_heading_and_utf8_bom(
+    client, app, processing_user_token, monkeypatch
+):
+    from app.routes import documents as document_routes
+
+    monkeypatch.setattr(document_routes, "process_document_embeddings", lambda document_id: True)
+    for filename, content, expected_text in (
+        ("heading.md", b"# E-learning-platform", "# E-learning-platform"),
+        ("heading-bom.md", b"\xef\xbb\xbf# E-learning-platform", "# E-learning-platform"),
+        ("guide.md", b"# Guide\n\nText.\n\n```py\nprint('ok')\n```",
+         "# Guide\n\nText.\n\n```py\nprint('ok')\n```"),
+    ):
+        response = upload_file(client, processing_user_token, filename, content)
+        assert response.status_code == 201
+        document_id = response.get_json()["document"]["id"]
+        with app.app_context():
+            document = db.session.get(Document, document_id)
+            assert document.status == "PROCESSED"
+            assert document.extracted_text == expected_text
+
+
+def test_markdown_upload_rejects_binary_content(client, processing_user_token):
+    response = upload_file(
+        client, processing_user_token, "binary.md", b"# E-learning\x00platform"
+    )
+    assert response.status_code == 400
+    assert "binary" in response.get_json()["message"].lower()
+
+
 def test_pdf_upload_extracts_text(
     client,
     app,

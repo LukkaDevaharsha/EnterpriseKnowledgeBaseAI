@@ -25,7 +25,7 @@ documents_bp = Blueprint(
     url_prefix="/api/documents",
 )
 
-ALLOWED_EXTENSIONS = {"pdf", "txt"}
+ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "md", "pptx", "csv", "xlsx"}
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
@@ -75,7 +75,7 @@ def upload_document():
         return error("Invalid filename.", 400)
 
     if "." not in original_filename:
-        return error("Only PDF and TXT files are allowed.", 400)
+        return error("Supported formats are PDF, DOCX, TXT, MD, PPTX, CSV, and XLSX.", 400)
 
     extension = original_filename.rsplit(".", 1)[-1].lower()
 
@@ -98,22 +98,21 @@ def upload_document():
     if len(content) > MAX_FILE_SIZE:
         return error("File size must not exceed 10 MB.", 413)
 
-    if extension == "pdf":
-        if not content.startswith(b"%PDF-"):
-            return error("The uploaded file is not a valid PDF.", 400)
-
-        file_type = "PDF"
-
-    else:
-        if b"\x00" in content:
-            return error("The TXT file contains invalid binary data.", 400)
-
+    file_type = extension.upper()
+    if file_type == "PDF" and not content.startswith(b"%PDF-"):
+        return error("The uploaded file is not a valid PDF.", 400)
+    if file_type in {"TXT", "CSV"}:
+        from app.services.document_processor import _decode_text
         try:
-            content.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return error("The TXT file must use UTF-8 encoding.", 400)
-
-        file_type = "TXT"
+            _decode_text(content)
+        except ValueError as exc:
+            return error(str(exc), 400)
+    elif file_type == "MD":
+        from app.services.document_processor import _decode_markdown
+        try:
+            _decode_markdown(content)
+        except ValueError as exc:
+            return error(str(exc), 400)
 
     stored_filename = str(uuid.uuid4())
     try:

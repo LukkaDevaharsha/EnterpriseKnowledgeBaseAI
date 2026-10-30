@@ -33,7 +33,7 @@ const EMPLOYEE_LINKS = [
   { to: '/', label: 'Home', icon: 'home', end: true },
   { to: '/library', label: 'Knowledge Library', icon: 'library' },
   { to: '/ask', label: 'Ask BaseAI', icon: 'ask' },
-  { to: '/study', label: 'Study PDFs', icon: 'study' },
+  { to: '/study', label: 'Study Documents', icon: 'study' },
 ]
 
 const ADMIN_EXTRA = [{ to: '/admin', label: 'Administration', icon: 'admin' }]

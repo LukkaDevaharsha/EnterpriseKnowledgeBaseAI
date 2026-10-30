@@ -300,7 +300,7 @@ def study_documents():
         return _error("Active verified user account required.", 403)
     documents = Document.query.filter(
         ((Document.uploaded_by == user.id) | Document.is_shared.is_(True)),
-        Document.file_type == "PDF",
+        Document.file_type.in_(["PDF", "DOCX", "TXT", "MD", "PPTX", "CSV", "XLSX"]),
     ).order_by(Document.title, Document.id).all()
     return jsonify({"status": "success", "documents": [doc.to_dict() for doc in documents]}), 200
 
@@ -316,13 +316,13 @@ def download_study_document(document_id):
     if user is None or not user.is_active or not user.is_verified:
         return _error("Active verified user account required.", 403)
     doc = _protected_document(document_id, user=user)
-    if doc is None or doc.file_type != "PDF":
-        return _error("PDF document not found.", 404)
+    if doc is None:
+        return _error("Study document not found.", 404)
     path = current_app.config["DOCUMENT_STORAGE_PATH"]
     if not os.path.isfile(os.path.join(path, doc.stored_filename)):
         return _error("Document file is missing from storage.", 404)
     response = send_from_directory(path, doc.stored_filename, as_attachment=False,
-                                   download_name=doc.original_filename, mimetype="application/pdf")
+                                   download_name=doc.original_filename, mimetype="application/octet-stream")
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -339,16 +339,16 @@ def study_document_pages(document_id):
     if user is None or not user.is_active or not user.is_verified:
         return _error("Active verified user account required.", 403)
     document = _protected_document(document_id, user=user)
-    if document is None or document.file_type != "PDF":
-        return _error("PDF document not found.", 404)
+    if document is None:
+        return _error("Study document not found.", 404)
     path = os.path.join(current_app.config["DOCUMENT_STORAGE_PATH"], document.stored_filename)
     if not os.path.isfile(path):
         return _error("Document file is missing from storage.", 404)
     try:
-        pages = extract_document_pages(path, "PDF")
-        outline = extract_pdf_outline(path)
+        pages = extract_document_pages(path, document.file_type)
+        outline = extract_pdf_outline(path) if document.file_type == "PDF" else []
     except ValueError:
-        return _error("PDF text could not be extracted.", 422)
+        return _error("Document text could not be extracted.", 422)
     return jsonify({
         "status": "success", "document_id": document.id,
         "pages": [{"page_number": number, "text": text} for number, text in pages],
@@ -433,12 +433,16 @@ def ask_study_document(document_id):
         return _error("Active verified user account required.", 403)
 
     document = _protected_document(document_id, user=user)
-    if (document is None or document.file_type != "PDF"
-            or document.status != "PROCESSED"):
-        return _error("PDF document not found.", 404)
+    if (document is None or document.status != "PROCESSED"):
+        return _error("Study document not found.", 404)
     if not (document.extracted_text or "").strip():
+        if document.file_type == "PDF":
+            return _error(
+                "This PDF has no extracted text. Upload a text-based PDF or run OCR, then reprocess it.",
+                422,
+            )
         return _error(
-            "This PDF has no extracted text. Upload a text-based PDF or run OCR, then reprocess it.",
+            "This document has no extracted text. Check the file content and upload it again.",
             422,
         )
 

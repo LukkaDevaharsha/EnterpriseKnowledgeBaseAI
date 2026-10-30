@@ -87,12 +87,14 @@ def _to_result(chunk, document, score):
         "document_title": document.title,
         "document_type": document.file_type,
         "chunk_index": chunk.chunk_index,
+        "start_char": chunk.start_char,
+        "end_char": chunk.end_char,
         "content": content,
         "similarity_score": score,
     }
 
 
-def search_chunks(query, user_id, limit=DEFAULT_LIMIT):
+def search_chunks(query, user_id, limit=DEFAULT_LIMIT, document_id=None):
     """Return authorized chunks ordered by cosine similarity descending.
 
     Cosine similarity ranges from -1 to 1; it is a geometric similarity score,
@@ -116,6 +118,8 @@ def search_chunks(query, user_id, limit=DEFAULT_LIMIT):
                 DocumentChunk.embedding.isnot(None),
             )
         )
+        if document_id is not None:
+            base_query = base_query.filter(Document.id == document_id)
         # Keyset batches avoid both a large result list and long-lived server
         # cursors while ensuring ownership is filtered in the database.
         batch_size = 256

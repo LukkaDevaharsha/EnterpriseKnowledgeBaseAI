@@ -57,6 +57,23 @@ function AssistantIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.8-5.3 1.7-1.7 5.5-1.8-5.5L5 10.8 10.2 9 12 3.5Z" /><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" /></svg>
 }
 
+function DocumentPreview({ document: doc, pages }) {
+  if (!doc || !pages.length) return <div className="reader-empty"><EmptyState title="Preview unavailable">This document has no readable extracted content.</EmptyState></div>
+  const tabular = ['CSV', 'XLSX'].includes(doc.file_type)
+  return <div className="pdf-pages-scroll document-preview" aria-label={`${doc.file_type} document preview`}>
+    {pages.map((page, index) => <article className="panel document-preview-page" key={`${doc.id}:${index}`}>
+      {page.page_number && <h3>Slide {page.page_number}</h3>}
+      {tabular ? <div className="table-wrap"><table className="documents-table"><tbody>{page.text.split('\n').filter(Boolean).map((line, row) => {
+        const cells = line.replace(/^Row \d+: /, '').split(' | ')
+        return <tr key={row}>{row === 0 && doc.file_type === 'CSV' ? cells.map((cell, col) => <th key={col}>{cell}</th>) : cells.map((cell, col) => <td key={col}>{cell}</td>)}</tr>
+      })}</tbody></table></div> : <div className="document-preview-text">{page.text.split('\n').map((line, row) => {
+        const heading = /^#{1,6}\s+/.test(line) || line.startsWith('Heading: ')
+        return heading ? <h3 key={row}>{line.replace(/^#{1,6}\s+/, '').replace(/^Heading: /, '')}</h3> : <p key={row}>{line || '\u00a0'}</p>
+      })}</div>}
+    </article>)}
+  </div>
+}
+
 function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, onVisible, isCurrent }) {
   const [nearViewport, setNearViewport] = useState(false)
   const [image, setImage] = useState(null)
@@ -155,9 +172,9 @@ export default function StudyPDF() {
     let active = true
     studyApi.documents(token).then((result) => {
       if (!active) return
-      const pdfs = (result.documents || []).filter((doc) => doc.file_type === 'PDF' && doc.status === 'PROCESSED')
-      const initial = pdfs.find((doc) => String(doc.id) === requestedDocumentId) || pdfs[0]
-      setDocuments(pdfs)
+      const available = (result.documents || []).filter((doc) => doc.status === 'PROCESSED')
+      const initial = available.find((doc) => String(doc.id) === requestedDocumentId) || available[0]
+      setDocuments(available)
       setDocumentId(initial ? String(initial.id) : '')
       setDocumentLoading(Boolean(initial))
       setPages([])
@@ -298,62 +315,62 @@ export default function StudyPDF() {
     setRetryCount((count) => count + 1)
   }
 
-  if (listLoading) return <div className="page-content"><PageLoading label="Loading available PDFs…" /></div>
+  if (listLoading) return <div className="page-content"><PageLoading label="Loading available documents…" /></div>
   if (error && documents.length === 0) return <div className="page-content"><ErrorMessage>{error}</ErrorMessage><button className="button button-secondary" onClick={retry}>Retry</button></div>
   if (!documents.length) return <div className="page-content study-page">
     <PageHeading />
-    <EmptyState title="No indexed PDFs available">Upload a PDF to your files, or ask an administrator to share one with your workspace.</EmptyState>
+    <EmptyState title="No indexed documents available">Upload a supported document to your files, or ask an administrator to share one with your workspace.</EmptyState>
   </div>
 
   return <div className="page-content study-page">
     <header className="page-heading study-heading">
-      <div><span className="eyebrow">READ · SEARCH · STUDY</span><h1>Study PDFs</h1>
-        <p>Read and search authorized PDFs, with document-scoped BaseAI when you need it.</p>
+      <div><span className="eyebrow">READ · SEARCH · STUDY</span><h1>Study Documents</h1>
+        <p>Read authorized documents and ask BaseAI questions grounded in the selected file.</p>
       </div>
-      <span className="study-document-count">{documents.length} {documents.length === 1 ? 'PDF' : 'PDFs'}</span>
+      <span className="study-document-count">{documents.length} {documents.length === 1 ? 'document' : 'documents'}</span>
     </header>
     <ErrorMessage>{error}</ErrorMessage>
     <div className={`study-workspace${libraryOpen ? ' library-open' : ''}`}>
       {libraryOpen && <aside className="study-library panel" aria-label="PDF library and table of contents">
-        <div className="study-panel-heading"><div><span className="eyebrow">PDF LIBRARY</span><h2>Study materials</h2></div><span className="heading-count">{documents.length}</span></div>
-        <nav className="study-document-list" aria-label="Available PDFs">
+        <div className="study-panel-heading"><div><span className="eyebrow">DOCUMENT LIBRARY</span><h2>Study materials</h2></div><span className="heading-count">{documents.length}</span></div>
+        <nav className="study-document-list" aria-label="Available documents">
           {documents.map((doc) => {
             const title = getDocumentTitle(doc)
             const filename = getDistinctFilename(doc)
             return <button key={doc.id} type="button" aria-current={documentId === String(doc.id) ? 'page' : undefined}
               className={`study-document-option${documentId === String(doc.id) ? ' selected' : ''}`}
               onClick={() => selectDocument(String(doc.id))}>
-              <span className="file-badge pdf">PDF</span><span><strong title={title}>{title}</strong>{filename && <small title={filename}>{filename}</small>}</span>
+              <span className={`file-badge ${doc.file_type.toLowerCase()}`}>{doc.file_type}</span><span><strong title={title}>{title}</strong>{filename && <small title={filename}>{filename}</small>}</span>
             </button>
           })}
         </nav>
         <div className="study-outline-heading"><span className="eyebrow">TABLE OF CONTENTS</span></div>
-        {outlineTree.length
+        {selectedDocument?.file_type === 'PDF' && outlineTree.length
           ? <ul className="study-outline"><OutlineItems items={outlineTree} collapsed={collapsed} toggle={toggleOutline} goToPage={goToPage} currentPage={pageNumber} /></ul>
-          : <p className="outline-empty">This PDF has no saved bookmarks. Use page navigation or search its text.</p>}
+          : selectedDocument?.file_type === 'PDF' && <p className="outline-empty">This PDF has no saved bookmarks. Use page navigation or search its text.</p>}
       </aside>}
       {libraryOpen && <button type="button" className="study-library-backdrop" aria-label="Close PDF navigation" onClick={() => setLibraryOpen(false)} />}
 
-      <section className="study-reader panel" aria-label="PDF reader">
+      <section className="study-reader panel" aria-label="Document reader">
         <div className="reader-toolbar">
           <button type="button" className="reader-icon-button" aria-label={libraryOpen ? 'Hide PDF navigation' : 'Show PDF navigation'}
             aria-expanded={libraryOpen} onClick={() => setLibraryOpen((open) => !open)}><LibraryIcon /></button>
-          <div className="reader-document-title"><span className="file-badge pdf">PDF</span><div><strong title={getDocumentTitle(selectedDocument)}>{getDocumentTitle(selectedDocument)}</strong>{getDistinctFilename(selectedDocument) && <small>{getDistinctFilename(selectedDocument)}</small>}</div></div>
+          <div className="reader-document-title"><span className={`file-badge ${selectedDocument?.file_type?.toLowerCase() || 'pdf'}`}>{selectedDocument?.file_type || 'PDF'}</span><div><strong title={getDocumentTitle(selectedDocument)}>{getDocumentTitle(selectedDocument)}</strong>{getDistinctFilename(selectedDocument) && <small>{getDistinctFilename(selectedDocument)}</small>}</div></div>
           <div className="reader-toolbar-actions">
             {pdfUrl && <a className="button button-secondary button-small" href={pdfUrl} download={selectedDocument?.original_filename || 'document.pdf'}>Download</a>}
             <button type="button" className="reader-icon-button assistant-launcher" aria-label="Open BaseAI study assistant"
               aria-expanded={assistantOpen} onClick={() => setAssistantOpen(true)}><AssistantIcon /><span>Ask BaseAI</span></button>
           </div>
         </div>
-        <div className="reader-search-tools">
+        {selectedDocument?.file_type === 'PDF' && <div className="reader-search-tools">
           <label className="sr-only" htmlFor="study-search">Search this PDF</label>
           <input id="study-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setMatchIndex(0) }} placeholder="Search text in this PDF" />
           <span className="study-match-count" aria-live="polite">{query ? `${matches.length ? matchIndex + 1 : 0} of ${matches.length} matches` : 'Search within PDF'}</span>
           <button type="button" className="button button-secondary button-small" onClick={() => navigateMatch(-1)} disabled={!matches.length} aria-label="Previous search match">Previous</button>
           <button type="button" className="button button-secondary button-small" onClick={() => navigateMatch(1)} disabled={!matches.length} aria-label="Next search match">Next</button>
           <button type="button" className="button button-tertiary button-small" onClick={() => { setQuery(''); setMatchIndex(0) }} disabled={!query}>Clear</button>
-        </div>
-        <div className="reader-controls">
+        </div>}
+        {selectedDocument?.file_type === 'PDF' && <div className="reader-controls">
           <button className="button button-secondary button-small" type="button" disabled={pageIndex <= 0} onClick={() => goToPage(pageNumber - 1)}>Previous page</button>
           <label>Page <input aria-label="Current page" type="number" min="1" max={pages.length} value={pageNumber}
             onChange={(event) => goToPage(Number(event.target.value))} /></label>
@@ -364,9 +381,10 @@ export default function StudyPDF() {
           <span className="zoom-value">{fitWidth ? 'Fit width' : `${zoom}%`}</span>
           <button className="button button-tertiary button-small" type="button" aria-label="Zoom in" disabled={fitWidth || zoom >= 200} onClick={() => setZoom((value) => Math.min(200, value + 10))}>+</button>
           <button className="button button-tertiary button-small" type="button" onClick={() => setFitWidth((fit) => !fit)}>{fitWidth ? 'Set zoom' : 'Fit width'}</button>
-        </div>
-        {documentLoading ? <div className="reader-empty"><PageLoading label="Opening the protected PDF…" /></div>
-          : error ? <div className="reader-empty"><ErrorMessage>{error}</ErrorMessage><button className="button button-secondary" onClick={retry}>Retry PDF</button></div>
+        </div>}
+        {documentLoading ? <div className="reader-empty"><PageLoading label="Opening document preview…" /></div>
+          : error ? <div className="reader-empty"><ErrorMessage>{error}</ErrorMessage><button className="button button-secondary" onClick={retry}>Retry document</button></div>
+            : selectedDocument?.file_type !== 'PDF' ? <DocumentPreview document={selectedDocument} pages={pages} />
             : <>
               {visibleExcerpt && <details className="study-source-excerpt" open>
                 <summary>{sourceExcerpt && sourcePageIsCurrent ? 'Retrieved source passage' : `Matching text excerpt ? page ${pageNumber}`}</summary>
@@ -379,7 +397,7 @@ export default function StudyPDF() {
                 {pages.map((page, index) => <StudyPDFPage key={`${documentId}:${page.page_number || index + 1}`}
                   token={token} documentId={documentId} page={page} index={index} query={query}
                   fitWidth={fitWidth} zoom={zoom} onVisible={onPageVisible} isCurrent={pageIndex === index} />)}
-              </div>
+        </div>
               {query && matches.length === 0 && <p className="reader-no-match">No exact text matches in this PDF. A retrieved passage may still be shown above.</p>}
             </>}
       </section>
@@ -398,5 +416,5 @@ export default function StudyPDF() {
 }
 
 function PageHeading() {
-  return <header className="page-heading"><div><span className="eyebrow">READ · SEARCH · STUDY</span><h1>Study PDFs</h1><p>Read authorized documents and search extracted text.</p></div></header>
+  return <header className="page-heading"><div><span className="eyebrow">READ · SEARCH · STUDY</span><h1>Study Documents</h1><p>Read authorized documents and search extracted text.</p></div></header>
 }

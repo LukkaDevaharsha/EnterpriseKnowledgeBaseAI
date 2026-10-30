@@ -13,7 +13,7 @@ from app.services.chunk_embedding_pipeline import process_document_embeddings
 from app.services.document_processor import extract_document_pages
 from app.services.text_chunker import split_text
 
-ALLOWED_EXTENSIONS = {"pdf", "txt"}
+ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "md", "pptx", "csv", "xlsx"}
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
@@ -31,7 +31,7 @@ def create_document_upload(uploaded_file, user, title="", is_shared=False):
         raise DocumentUploadError("Invalid filename.", 400)
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if extension not in ALLOWED_EXTENSIONS:
-        raise DocumentUploadError("Only PDF and TXT files are allowed.", 400)
+        raise DocumentUploadError("Supported formats are PDF, DOCX, TXT, MD, PPTX, CSV, and XLSX.", 400)
     title = (title or "").strip() or filename
     if len(title) > 255:
         raise DocumentUploadError("Title must not exceed 255 characters.", 400)
@@ -40,18 +40,22 @@ def create_document_upload(uploaded_file, user, title="", is_shared=False):
         raise DocumentUploadError("The uploaded file is empty.", 400)
     if len(content) > MAX_FILE_SIZE:
         raise DocumentUploadError("File size must not exceed 10 MB.", 413)
-    if extension == "pdf":
-        if not content.startswith(b"%PDF-"):
-            raise DocumentUploadError("The uploaded file is not a valid PDF.", 400)
-        file_type = "PDF"
-    else:
-        if b"\x00" in content:
-            raise DocumentUploadError("The TXT file contains invalid binary data.", 400)
-        try:
-            content.decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise DocumentUploadError("The TXT file must use UTF-8 encoding.", 400) from exc
-        file_type = "TXT"
+    file_type = extension.upper()
+    # Verify the actual bytes before writing to storage, including OOXML ZIP structure.
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{extension}", delete=False) as probe:
+            probe.write(content)
+            probe_path = probe.name
+        extract_document_pages(probe_path, file_type)
+    except ValueError as exc:
+        raise DocumentUploadError(str(exc), 400) from exc
+    finally:
+        if 'probe_path' in locals():
+            try:
+                os.remove(probe_path)
+            except OSError:
+                pass
 
     storage = current_app.config["DOCUMENT_STORAGE_PATH"]
     stored_filename = str(uuid.uuid4())
