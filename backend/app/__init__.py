@@ -205,7 +205,7 @@ def create_app(config_overrides=None):
     app.config["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "")
     app.config["GEMINI_MODEL"] = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     app.config["GEMINI_TIMEOUT_SECONDS"] = float(
-        os.getenv("GEMINI_TIMEOUT_SECONDS", os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
+        os.getenv("GEMINI_TIMEOUT_SECONDS", "120")
     )
     app.config["EMAIL_PROVIDER"] = os.getenv("EMAIL_PROVIDER", "smtp")
     app.config["RESEND_API_KEY"] = os.getenv("RESEND_API_KEY", "")

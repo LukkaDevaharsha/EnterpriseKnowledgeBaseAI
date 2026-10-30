@@ -188,9 +188,13 @@ def answer_question(question, user_id, top_k=None, document_id=None):
             "insufficient_evidence": True,
         }
 
+    generation_options = {
+        "model": current_app.config.get("COMPANY_KNOWLEDGE_MODEL")
+    }
+    if current_app.config.get("LLM_PROVIDER") == "gemini":
+        generation_options["generation_mode"] = "company"
     raw_answer = generate_chat_answer(
-        question, evidence_json, SYSTEM_PROMPT,
-        model=current_app.config.get("COMPANY_KNOWLEDGE_MODEL"),
+        question, evidence_json, SYSTEM_PROMPT, **generation_options,
     )
     answer, citations, insufficient = _clean_answer(raw_answer, citations_by_source)
     return {

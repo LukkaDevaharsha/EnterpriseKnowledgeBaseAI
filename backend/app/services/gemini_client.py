@@ -9,7 +9,10 @@ def _create_client(api_key, timeout_ms):
 
     return genai.Client(
         api_key=api_key,
-        http_options=types.HttpOptions(timeout=timeout_ms),
+        http_options=types.HttpOptions(
+            timeout=timeout_ms,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
     )
 
 
@@ -24,7 +27,7 @@ def get_gemini_client():
         return client
 
     try:
-        timeout_ms = int(float(current_app.config.get("GEMINI_TIMEOUT_SECONDS", 60)) * 1000)
+        timeout_ms = int(float(current_app.config.get("GEMINI_TIMEOUT_SECONDS", 120)) * 1000)
         client = _create_client(api_key, timeout_ms)
     except ImportError as exc:
         raise RuntimeError("Gemini SDK dependencies are not installed.") from exc

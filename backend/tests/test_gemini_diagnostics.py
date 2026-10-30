@@ -1,4 +1,6 @@
 import logging
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from flask_jwt_extended import create_access_token
@@ -25,6 +27,7 @@ def _fake_gemini_client(monkeypatch, models):
         "app.services.gemini_client.get_gemini_client",
         lambda: type("Client", (), {"models": models})(),
     )
+    return models
 
 
 @pytest.mark.parametrize(
@@ -144,6 +147,105 @@ def test_gemini_sdk_initializes_with_backend_key_and_configured_timeout(app, mon
 
     assert seen == {"api_key": "private-sdk-key", "timeout_ms": 7000}
     assert app.extensions["gemini_client"] is client
+
+
+def test_gemini_sdk_timeout_is_milliseconds_and_retries_are_disabled(monkeypatch):
+    created = {}
+
+    class HttpOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class HttpRetryOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    types = ModuleType("google.genai.types")
+    types.HttpOptions = HttpOptions
+    types.HttpRetryOptions = HttpRetryOptions
+    genai = ModuleType("google.genai")
+    genai.Client = lambda **kwargs: created.update(kwargs) or "client"
+    genai.types = types
+    google = ModuleType("google")
+    google.genai = genai
+    monkeypatch.setitem(sys.modules, "google", google)
+    monkeypatch.setitem(sys.modules, "google.genai", genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", types)
+
+    result = gemini_client._create_client("test-key", 120_000)
+
+    assert result == "client"
+    options = created["http_options"].kwargs
+    assert options["timeout"] == 120_000
+    assert options["retry_options"].kwargs == {"attempts": 1}
+
+
+def test_gemini_timeout_defaults_to_120_seconds(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("JWT_SECRET_KEY", "config-test-key")
+    monkeypatch.setenv("DOCUMENT_STORAGE_PATH", str(tmp_path / "files"))
+    monkeypatch.delenv("GEMINI_TIMEOUT_SECONDS", raising=False)
+
+    configured = create_app({"TESTING": True})
+
+    assert configured.config["GEMINI_TIMEOUT_SECONDS"] == 120
+
+
+@pytest.mark.parametrize(
+    "mode, expected_tokens",
+    [("general", 512), ("company", 1024), ("study", 1536)],
+)
+def test_gemini_3_uses_low_thinking_and_mode_token_limit(
+    app, monkeypatch, mode, expected_tokens
+):
+    calls = []
+    models = _fake_gemini_client(monkeypatch, type("Models", (), {
+        "generate_content": lambda *_a, **kwargs: calls.append(kwargs) or type(
+            "Response", (), {"text": "A safe answer."}
+        )()
+    })())
+    with app.app_context():
+        _set_gemini_config(app, monkeypatch)
+        result = ollama_client.generate_chat_answer(
+            "question", "[]" if mode == "general" else '[{"excerpt":"passage"}]',
+            "system prompt", model="gemini-3.8-flash", generation_mode=mode,
+        )
+
+    assert result == "A safe answer."
+    request = calls[0]
+    if mode in {"general", "study"}:
+        assert request["config"]["thinking_config"] == {"thinking_level": "low"}
+    else:
+        assert "thinking_config" not in request["config"]
+    assert request["config"]["max_output_tokens"] == expected_tokens
+    if mode == "general":
+        assert "Retrieved evidence" not in request["contents"]
+    else:
+        assert "Retrieved evidence (JSON)" in request["contents"]
+
+
+def test_gemini_504_is_sanitized_and_keeps_safe_unavailable_error(
+    app, monkeypatch, caplog
+):
+    error = type("ServerError", (Exception,), {
+        "code": 504, "status": "DEADLINE_EXCEEDED",
+        "message": "Deadline expired before operation could complete.",
+    })()
+    models = type("Models", (), {
+        "generate_content": lambda *_a, **_k: (_ for _ in ()).throw(error)
+    })()
+    _fake_gemini_client(monkeypatch, models)
+    with app.app_context():
+        _set_gemini_config(app, monkeypatch)
+        with pytest.raises(OllamaUnavailableError) as raised:
+            ollama_client.generate_chat_answer(
+                "private question marker 44", "[]", "private system", model="gemini-3.8-flash"
+            )
+
+    assert str(raised.value) == "The language model provider is temporarily unavailable."
+    assert "http_status=504" in caplog.text
+    assert "provider_error_code=DEADLINE_EXCEEDED" in caplog.text
+    assert "private question marker 44" not in caplog.text
 
 
 def test_gemini_model_and_general_mode_resolve_from_environment(monkeypatch, tmp_path):

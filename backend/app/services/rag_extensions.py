@@ -74,9 +74,11 @@ def _general_answer(question):
             "answer_type": "general",
         }
 
+    generation_options = {"model": current_app.config["GENERAL_AI_MODEL"]}
+    if current_app.config.get("LLM_PROVIDER") == "gemini":
+        generation_options["generation_mode"] = "general"
     raw = rag_service.generate_chat_answer(
-        question, "[]", GENERAL_SYSTEM_PROMPT,
-        model=current_app.config["GENERAL_AI_MODEL"],
+        question, "[]", GENERAL_SYSTEM_PROMPT, **generation_options,
     )
     raw = raw[:rag_service.MAX_ANSWER_CHARS].strip()
     if (not raw or rag_service.SOURCE_REFERENCE_RE.search(raw)
@@ -156,9 +158,14 @@ def answer_question(question, user_id, top_k=None, document_id=None):
         "STUDY_PDF_MODEL"
         if document_id is not None else "COMPANY_KNOWLEDGE_MODEL"
     )
+    generation_options = {"model": current_app.config[model_key]}
+    if current_app.config.get("LLM_PROVIDER") == "gemini":
+        generation_options["generation_mode"] = (
+            "study" if document_id is not None else "company"
+        )
     raw = rag_service.generate_chat_answer(
         question, json.dumps(entries, ensure_ascii=False), rag_service.SYSTEM_PROMPT,
-        model=current_app.config[model_key],
+        **generation_options,
     )
     answer, citations, insufficient = rag_service._clean_answer(raw, citation_map)
     # Small local models sometimes return relevant text without the required

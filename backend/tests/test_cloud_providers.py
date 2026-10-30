@@ -92,7 +92,7 @@ def test_gemini_generation_uses_mode_model_and_existing_prompt_fields(app, monke
     ]
     assert models.generation_calls[0]["contents"].startswith("Question:\nq")
     assert models.generation_calls[0]["config"]["system_instruction"] == "system"
-    assert models.generation_calls[0]["config"]["max_output_tokens"] == 512
+    assert models.generation_calls[0]["config"]["max_output_tokens"] == 1024
 
 
 @pytest.mark.parametrize(
