@@ -1,5 +1,7 @@
 """SMTP and Resend delivery adapters for verification messages."""
 
+import base64
+import html
 import json
 import socket
 import smtplib
@@ -8,6 +10,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from flask import current_app
+
+
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
+DEFAULT_GMAIL_SENDER = "webmanagerepm01@gmail.com"
 
 
 class EmailDeliveryError(RuntimeError):
@@ -23,6 +30,8 @@ class EmailDeliveryError(RuntimeError):
 
 def send_verification_code(recipient, code):
     config = current_app.config
+    if config.get("EMAIL_PROVIDER", "smtp") == "gmail_api":
+        return _send_with_gmail_api(recipient, code, config)
     if config.get("EMAIL_PROVIDER", "smtp") == "resend":
         return _send_with_resend(recipient, code, config)
     return _send_with_smtp(recipient, code, config)
@@ -121,3 +130,97 @@ def _send_with_resend(recipient, code, config):
         }:
             raise EmailDeliveryError("resend_timeout") from None
         raise EmailDeliveryError("resend_connection") from None
+
+
+def _gmail_dependencies():
+    from google.auth.transport.requests import Request as GoogleAuthRequest
+    from google.oauth2.credentials import Credentials
+    from google_auth_httplib2 import AuthorizedHttp
+    from googleapiclient.discovery import build
+    import httplib2
+
+    return Credentials, GoogleAuthRequest, AuthorizedHttp, httplib2, build
+
+
+def _build_gmail_service(config):
+    """Build a Gmail API client with refresh-token OAuth and bounded HTTP calls."""
+    Credentials, GoogleAuthRequest, AuthorizedHttp, httplib2, build = _gmail_dependencies()
+    timeout = float(config.get("GMAIL_TIMEOUT_SECONDS", 10))
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=config["GMAIL_REFRESH_TOKEN"],
+        token_uri=GMAIL_TOKEN_URI,
+        client_id=config["GMAIL_CLIENT_ID"],
+        client_secret=config["GMAIL_CLIENT_SECRET"],
+        scopes=[GMAIL_SEND_SCOPE],
+    )
+    if not credentials.valid:
+        auth_request = GoogleAuthRequest()
+        credentials.refresh(
+            lambda url, **kwargs: auth_request(
+                url, timeout=timeout, **kwargs
+            )
+        )
+    http = AuthorizedHttp(credentials, http=httplib2.Http(timeout=timeout))
+    return build("gmail", "v1", http=http, cache_discovery=False)
+
+
+def _send_with_gmail_api(recipient, code, config):
+    required = (
+        "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN",
+        "GMAIL_SENDER_EMAIL",
+    )
+    missing = tuple(
+        key for key in required
+        if not isinstance(config.get(key), str) or not config[key].strip()
+    )
+    if missing:
+        raise EmailDeliveryError("missing_configuration", missing_settings=missing)
+
+    message = EmailMessage()
+    message["Subject"] = "Verify your Enterprise Knowledge Base account"
+    message["From"] = config["GMAIL_SENDER_EMAIL"]
+    message["To"] = recipient
+    text_body = _message_text(code)
+    message.set_content(text_body)
+    message.add_alternative(
+        "<p>Your one-time verification code is <strong>"
+        + html.escape(str(code))
+        + "</strong>. It expires in 10 minutes.</p>",
+        subtype="html",
+    )
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+
+    try:
+        service = _build_gmail_service(config)
+        service.users().messages().send(
+            userId="me", body={"raw": raw}
+        ).execute()
+    except Exception as exc:
+        if isinstance(exc, EmailDeliveryError):
+            raise
+        status = getattr(exc, "status_code", None)
+        response = getattr(exc, "resp", None)
+        if status is None and response is not None:
+            status = getattr(response, "status", None)
+        if _is_timeout_error(exc):
+            raise EmailDeliveryError("gmail_timeout") from None
+        if status == 401:
+            raise EmailDeliveryError("gmail_authentication") from None
+        if status == 429 or (isinstance(status, int) and status >= 500):
+            raise EmailDeliveryError("gmail_unavailable") from None
+        if isinstance(exc, ImportError):
+            raise EmailDeliveryError("gmail_sdk_missing") from None
+        raise EmailDeliveryError("gmail_api_failure") from None
+
+
+def _is_timeout_error(exc):
+    current = exc
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (TimeoutError, socket.timeout)) or "timeout" in type(current).__name__.lower():
+            return True
+        current = current.__cause__ or current.__context__
+    return False

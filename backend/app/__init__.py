@@ -213,6 +213,15 @@ def create_app(config_overrides=None):
     app.config["RESEND_TIMEOUT_SECONDS"] = float(
         os.getenv("RESEND_TIMEOUT_SECONDS", "10")
     )
+    app.config["GMAIL_CLIENT_ID"] = os.getenv("GMAIL_CLIENT_ID", "")
+    app.config["GMAIL_CLIENT_SECRET"] = os.getenv("GMAIL_CLIENT_SECRET", "")
+    app.config["GMAIL_REFRESH_TOKEN"] = os.getenv("GMAIL_REFRESH_TOKEN", "")
+    app.config["GMAIL_SENDER_EMAIL"] = os.getenv(
+        "GMAIL_SENDER_EMAIL", "webmanagerepm01@gmail.com"
+    )
+    app.config["GMAIL_TIMEOUT_SECONDS"] = float(
+        os.getenv("GMAIL_TIMEOUT_SECONDS", "10")
+    )
     app.config["SMTP_HOST"] = os.getenv("SMTP_HOST", "")
     app.config["SMTP_PORT"] = int(os.getenv("SMTP_PORT", "587"))
     app.config["SMTP_USERNAME"] = os.getenv("SMTP_USERNAME", "")
@@ -263,7 +272,7 @@ def create_app(config_overrides=None):
     for provider_key, supported in (
         ("LLM_PROVIDER", {"ollama", "gemini"}),
         ("EMBEDDING_PROVIDER", {"sentence_transformers", "gemini"}),
-        ("EMAIL_PROVIDER", {"smtp", "resend"}),
+        ("EMAIL_PROVIDER", {"smtp", "resend", "gmail_api"}),
     ):
         selected = str(app.config.get(provider_key, "")).strip().lower()
         if selected not in supported:
@@ -281,6 +290,10 @@ def create_app(config_overrides=None):
         app.config["RESEND_TIMEOUT_SECONDS"]
     ) or app.config["RESEND_TIMEOUT_SECONDS"] <= 0:
         raise RuntimeError("RESEND_TIMEOUT_SECONDS must be greater than zero.")
+    if not isinstance(app.config["GMAIL_TIMEOUT_SECONDS"], (int, float)) or not math.isfinite(
+        app.config["GMAIL_TIMEOUT_SECONDS"]
+    ) or app.config["GMAIL_TIMEOUT_SECONDS"] <= 0:
+        raise RuntimeError("GMAIL_TIMEOUT_SECONDS must be greater than zero.")
 
     for mode_model_key in (
         "GENERAL_AI_MODEL", "COMPANY_KNOWLEDGE_MODEL", "STUDY_PDF_MODEL",

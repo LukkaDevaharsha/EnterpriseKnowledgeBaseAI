@@ -9,6 +9,11 @@ __pycache__/
 .env
 backend/.env
 
+# Local OAuth artifacts (never commit Gmail client or token files).
+/backend/.secrets/
+/backend/credentials.json
+/backend/token.json
+
 # User documents and downloaded model/cache artifacts
 /storage/
 /model-cache/
