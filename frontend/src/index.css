@@ -1,33 +1,49 @@
 :root {
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   line-height: 1.5;
-  color: #183144;
-  background: #e8edef;
+  color: #F0F3F6;
+  background: #0C1420;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --ink: #183144;
-  --ink-soft: #344b5d;
-  --muted: #617585;
-  --subtle: #8798a5;
-  --line: #d4dfe2;
-  --line-strong: #b9c9ce;
-  --surface: #ffffff;
-  --canvas: #e8edef;
-  --canvas-raised: #eff3f4;
-  --brand: #13bfe8;
-  --brand-dark: #1766a5;
-  --brand-soft: #e4f8ff;
-  --purple: #9158e8;
-  --teal: #e64ac8;
-  --cyan: #0aaed1;
-  --coral: #ef8a35;
-  --success: #6caa24;
-  --warning: #c88a12;
-  --danger: #d64b65;
-  --shadow-sm: 0 2px 10px rgb(24 49 68 / 5%);
-  --shadow-md: 0 12px 32px rgb(24 49 68 / 14%);
-  --shadow-brand: 0 4px 14px rgb(82 91 221 / 25%);
+  --bg-primary: #0C1420;
+  --bg-secondary: #101714;
+  --bg-sidebar: #141E27;
+  --surface-primary: #172333;
+  --surface-secondary: #19231E;
+  --surface-elevated: #202F40;
+  --surface-hover: #253129;
+  --accent-primary: #C28B61;
+  --accent-secondary: #91B8D5;
+  --accent-ai: #91AE98;
+  --accent-platinum: #B8C5D1;
+  --text-primary: #F0F3F6;
+  --text-secondary: #A2AEA4;
+  --text-muted: #82909E;
+  --border-primary: #2B3A4B;
+  --border-secondary: #344239;
+  --success: #91AE98;
+  --warning: #D8AE6A;
+  --danger: #CF7777;
+  --ink: var(--text-primary);
+  --ink-soft: var(--accent-platinum);
+  --muted: var(--text-secondary);
+  --subtle: var(--text-muted);
+  --line: var(--border-primary);
+  --line-strong: #405267;
+  --surface: var(--surface-primary);
+  --canvas: var(--bg-primary);
+  --canvas-raised: var(--surface-elevated);
+  --brand: var(--accent-primary);
+  --brand-dark: #D49A6D;
+  --brand-soft: #30271F;
+  --purple: var(--accent-ai);
+  --teal: var(--accent-secondary);
+  --cyan: var(--accent-secondary);
+  --coral: var(--accent-primary);
+  --shadow-sm: 0 2px 12px rgb(0 0 0 / 16%);
+  --shadow-md: 0 16px 42px rgb(0 0 0 / 38%);
+  --shadow-brand: 0 3px 12px rgb(194 139 97 / 18%);
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
@@ -45,7 +61,7 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; min-height: 100%; background: var(--canvas); scroll-behavior: smooth; }
+html { min-width: 320px; min-height: 100%; background: var(--bg-primary); scroll-behavior: smooth; }
 body { min-width: 320px; min-height: 100vh; margin: 0; }
 button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }

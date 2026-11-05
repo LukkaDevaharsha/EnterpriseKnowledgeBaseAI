@@ -74,7 +74,7 @@ function DocumentPreview({ document: doc, pages }) {
   </div>
 }
 
-function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, onVisible, isCurrent }) {
+function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, onVisible, isCurrent, matches, onSelectMatch }) {
   const [nearViewport, setNearViewport] = useState(false)
   const [image, setImage] = useState(null)
   const [error, setError] = useState(null)
@@ -128,13 +128,23 @@ function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, o
 
   return <article id={`study-pdf-page-${index}`} ref={reference}
     className={`rendered-pdf-page${isCurrent ? ' current' : ''}`} aria-label={`PDF page ${pageNumber}`}>
-    <div className="rendered-pdf-page-surface">
-      {ready && <img src={image.url} alt={`Page ${pageNumber}`} className="study-pdf-page"
-        style={{ width: fitWidth ? '100%' : `${zoom}%` }} />}
-      {!inRenderRange && !ready && <div className="pdf-page-placeholder" aria-hidden="true" />}
-      {inRenderRange && !ready && !failed && <div className="pdf-page-status" role="status"><PageLoading label={`Loading page ${pageNumber}…`} /></div>}
-      {failed && <div className="pdf-page-status"><ErrorMessage>{error.message}</ErrorMessage>
-        <button className="button button-secondary button-small" type="button" onClick={() => setRetry((count) => count + 1)}>Retry page</button></div>}
+    <div className="rendered-pdf-page-content" style={{ width: fitWidth ? 'calc(100% - 10px)' : `calc(${zoom}% - 10px)` }}>
+      <div className="rendered-pdf-page-surface">
+        {ready && <img src={image.url} alt={`Page ${pageNumber}`} className="study-pdf-page"
+          style={{ width: '100%' }} />}
+        {!inRenderRange && !ready && <div className="pdf-page-placeholder" aria-hidden="true" />}
+        {inRenderRange && !ready && !failed && <div className="pdf-page-status" role="status"><PageLoading label={`Loading page ${pageNumber}…`} /></div>}
+        {failed && <div className="pdf-page-status"><ErrorMessage>{error.message}</ErrorMessage>
+          <button className="button button-secondary button-small" type="button" onClick={() => setRetry((count) => count + 1)}>Retry page</button></div>}
+      </div>
+      {matches.length > 0 && <div className="pdf-search-marker-rail" aria-label={`Search matches on page ${pageNumber}`}>
+        {matches.map((match) => <button key={match.matchIndex} type="button"
+          className={`pdf-search-marker${match.matchIndex === match.activeMatchIndex ? ' active' : ''}`}
+          style={{ top: `${Math.max(1, Math.min(98, (match.offset / Math.max(1, page.text.length)) * 100))}%` }}
+          aria-label={`Search match ${match.matchIndex + 1} on page ${pageNumber}`}
+          title={`Match ${match.matchIndex + 1} of ${match.totalMatches} · Page ${pageNumber}`}
+          onClick={() => onSelectMatch(match.matchIndex)} />)}
+      </div>}
     </div>
     <span className="rendered-pdf-page-label">Page {pageNumber}</span>
   </article>
@@ -163,6 +173,7 @@ export default function StudyPDF() {
   const [collapsed, setCollapsed] = useState(() => new Set())
   const [libraryOpen, setLibraryOpen] = useState(() => !window.matchMedia('(max-width: 1200px)').matches)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [excerptOpen, setExcerptOpen] = useState(false)
   const [zoom, setZoom] = useState(100)
   const [fitWidth, setFitWidth] = useState(true)
   const initialScrollKey = useRef('')
@@ -295,6 +306,7 @@ export default function StudyPDF() {
   function navigateMatch(direction) {
     if (!matches.length) return
     const next = (matchIndex + direction + matches.length) % matches.length
+    setExcerptOpen(false)
     setMatchIndex(next)
     goToPage(pages[matches[next].pageIndex]?.page_number || matches[next].pageIndex + 1)
   }
@@ -364,11 +376,11 @@ export default function StudyPDF() {
         </div>
         {selectedDocument?.file_type === 'PDF' && <div className="reader-search-tools">
           <label className="sr-only" htmlFor="study-search">Search this PDF</label>
-          <input id="study-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setMatchIndex(0) }} placeholder="Search text in this PDF" />
+          <input id="study-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setMatchIndex(0); setExcerptOpen(false) }} placeholder="Search text in this PDF" />
           <span className="study-match-count" aria-live="polite">{query ? `${matches.length ? matchIndex + 1 : 0} of ${matches.length} matches` : 'Search within PDF'}</span>
           <button type="button" className="button button-secondary button-small" onClick={() => navigateMatch(-1)} disabled={!matches.length} aria-label="Previous search match">Previous</button>
           <button type="button" className="button button-secondary button-small" onClick={() => navigateMatch(1)} disabled={!matches.length} aria-label="Next search match">Next</button>
-          <button type="button" className="button button-tertiary button-small" onClick={() => { setQuery(''); setMatchIndex(0) }} disabled={!query}>Clear</button>
+          <button type="button" className="button button-tertiary button-small" onClick={() => { setQuery(''); setMatchIndex(0); setExcerptOpen(false) }} disabled={!query}>Clear</button>
         </div>}
         {selectedDocument?.file_type === 'PDF' && <div className="reader-controls">
           <button className="button button-secondary button-small" type="button" disabled={pageIndex <= 0} onClick={() => goToPage(pageNumber - 1)}>Previous page</button>
@@ -386,17 +398,27 @@ export default function StudyPDF() {
           : error ? <div className="reader-empty"><ErrorMessage>{error}</ErrorMessage><button className="button button-secondary" onClick={retry}>Retry document</button></div>
             : selectedDocument?.file_type !== 'PDF' ? <DocumentPreview document={selectedDocument} pages={pages} />
             : <>
-              {visibleExcerpt && <details className="study-source-excerpt" open>
-                <summary>{sourceExcerpt && sourcePageIsCurrent ? 'Retrieved source passage' : `Matching text excerpt ? page ${pageNumber}`}</summary>
-                <p>{highlightText(visibleExcerpt, query)}</p>
-                <small>{pageMatches.length
-                  ? 'Exact text matches are highlighted on this rendered page and in the excerpt.'
-                  : 'This is the retrieved source excerpt. The page highlights exact text matches for the current search.'}</small>
-              </details>}
+              {visibleExcerpt && <section className="study-source-excerpt">
+                <div className="study-excerpt-heading">
+                  <span>{sourceExcerpt && sourcePageIsCurrent ? 'Retrieved source passage' : `Matching text excerpt · page ${pageNumber}`}</span>
+                  <button type="button" className="button button-secondary button-small"
+                    aria-expanded={excerptOpen} onClick={() => setExcerptOpen((open) => !open)}>
+                    {excerptOpen ? 'Close excerpt' : 'Open excerpt'}
+                  </button>
+                </div>
+                {excerptOpen && <><p>{highlightText(visibleExcerpt, query)}</p>
+                  <small>{pageMatches.length
+                    ? 'Exact text matches are highlighted on this rendered page and in the excerpt.'
+                    : 'This is the retrieved source excerpt. The page highlights exact text matches for the current search.'}</small></>}
+              </section>}
               <div className="pdf-pages-scroll" aria-label="PDF pages">
                 {pages.map((page, index) => <StudyPDFPage key={`${documentId}:${page.page_number || index + 1}`}
                   token={token} documentId={documentId} page={page} index={index} query={query}
-                  fitWidth={fitWidth} zoom={zoom} onVisible={onPageVisible} isCurrent={pageIndex === index} />)}
+                  fitWidth={fitWidth} zoom={zoom} onVisible={onPageVisible} isCurrent={pageIndex === index}
+                  matches={matches.flatMap((match, globalMatchIndex) => match.pageIndex === index
+                    ? [{ ...match, matchIndex: globalMatchIndex, activeMatchIndex: matchIndex, totalMatches: matches.length }]
+                    : [])}
+                  onSelectMatch={(selected) => { setMatchIndex(selected); setExcerptOpen(false); goToPage(page.page_number || index + 1) }} />)}
         </div>
               {query && matches.length === 0 && <p className="reader-no-match">No exact text matches in this PDF. A retrieved passage may still be shown above.</p>}
             </>}
@@ -406,7 +428,7 @@ export default function StudyPDF() {
     <div className={`study-assistant-layer${assistantOpen ? ' open' : ''}`} aria-hidden={!assistantOpen}>
       <button type="button" className="study-assistant-backdrop" aria-label="Close BaseAI assistant" tabIndex={assistantOpen ? 0 : -1}
         onClick={() => setAssistantOpen(false)} />
-      <aside className="study-assistant panel" role="dialog" aria-modal="true" aria-label="BaseAI study assistant">
+      <aside className="study-assistant panel" role="dialog" aria-modal="false" aria-label="BaseAI study assistant">
         <div className="study-assistant-heading"><div><span className="eyebrow">STUDY ASSISTANT</span><strong>{selectedDocument?.title}</strong></div>
           <button type="button" className="reader-icon-button" aria-label="Close BaseAI assistant" onClick={() => setAssistantOpen(false)}>×</button></div>
         <BaseAI key={documentId} compact documentId={documentId} documentTitle={selectedDocument?.title} />

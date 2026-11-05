@@ -38,13 +38,18 @@ const EMPLOYEE_LINKS = [
 
 const ADMIN_EXTRA = [{ to: '/admin', label: 'Administration', icon: 'admin' }]
 
-export default function Navbar({ mobileOpen = false, onNavigate = () => {} }) {
+export default function Navbar({ mobileOpen = false, collapsed = false, onToggle = () => {}, onNavigate = () => {} }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
   const links = isAdmin ? [...EMPLOYEE_LINKS, ...ADMIN_EXTRA] : EMPLOYEE_LINKS
 
   return (
-    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>
+    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}${collapsed ? ' sidebar-icons-only' : ''}`}>
+      <button type="button" className="sidebar-toggle" onClick={onToggle}
+        aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+        aria-expanded={!collapsed} title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2" /><path d={collapsed ? 'M8 4v16m4-11 3 3-3 3' : 'M9 4v16m7-11-3 3 3 3'} /></svg>
+      </button>
       <NavLink className="brand" to="/" aria-label="Enterprise Knowledge Base" onClick={onNavigate}>
         <span className="brand-mark">K</span>
         <span className="brand-name">

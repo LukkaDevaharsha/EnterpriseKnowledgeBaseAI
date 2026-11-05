@@ -25,13 +25,16 @@ function ApplicationLayout() {
   const { user, logout } = useAuth()
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const navigate = useNavigate()
   function signOut() { logout(); navigate('/login', { replace: true }) }
   const pageTitle = PAGE_TITLES[location.pathname] || 'Knowledge Base'
 
   return (
-    <div className="app-shell">
-      <Navbar mobileOpen={mobileNavOpen} onNavigate={() => setMobileNavOpen(false)} />
+    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      <Navbar mobileOpen={mobileNavOpen} collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        onNavigate={() => setMobileNavOpen(false)} />
       {mobileNavOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
       <main className="main-area">
         <header className="topbar">
