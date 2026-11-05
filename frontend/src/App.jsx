@@ -28,12 +28,19 @@ function ApplicationLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const navigate = useNavigate()
   function signOut() { logout(); navigate('/login', { replace: true }) }
+  function toggleSidebar() {
+    if (window.matchMedia('(max-width: 1100px)').matches) {
+      setMobileNavOpen((open) => !open)
+      return
+    }
+    setSidebarCollapsed((collapsed) => !collapsed)
+  }
   const pageTitle = PAGE_TITLES[location.pathname] || 'Knowledge Base'
 
   return (
     <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <Navbar mobileOpen={mobileNavOpen} collapsed={sidebarCollapsed}
-        onToggle={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        onToggle={toggleSidebar}
         onNavigate={() => setMobileNavOpen(false)} />
       {mobileNavOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
       <main className="main-area">
@@ -42,6 +49,7 @@ function ApplicationLayout() {
             <button type="button" className="mobile-nav-toggle"
               aria-label={mobileNavOpen ? 'Close navigation' : 'Open navigation'}
               aria-expanded={mobileNavOpen}
+              aria-controls="primary-navigation"
               onClick={() => setMobileNavOpen((o) => !o)}>
               <span /><span /><span />
             </button>

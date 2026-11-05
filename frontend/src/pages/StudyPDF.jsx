@@ -334,7 +334,7 @@ export default function StudyPDF() {
     <EmptyState title="No indexed documents available">Upload a supported document to your files, or ask an administrator to share one with your workspace.</EmptyState>
   </div>
 
-  return <div className="page-content study-page">
+  return <div className={`page-content study-page${assistantOpen ? ' assistant-open' : ''}`}>
     <header className="page-heading study-heading">
       <div><span className="eyebrow">READ · SEARCH · STUDY</span><h1>Study Documents</h1>
         <p>Read authorized documents and ask BaseAI questions grounded in the selected file.</p>

@@ -44,7 +44,7 @@ export default function Navbar({ mobileOpen = false, collapsed = false, onToggle
   const links = isAdmin ? [...EMPLOYEE_LINKS, ...ADMIN_EXTRA] : EMPLOYEE_LINKS
 
   return (
-    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}${collapsed ? ' sidebar-icons-only' : ''}`}>
+    <aside id="primary-navigation" className={`sidebar${mobileOpen ? ' sidebar-open' : ''}${collapsed ? ' sidebar-icons-only' : ''}`}>
       <button type="button" className="sidebar-toggle" onClick={onToggle}
         aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
         aria-expanded={!collapsed} title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
