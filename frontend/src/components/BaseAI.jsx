@@ -100,6 +100,14 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
     }
   }
 
+  function handleQuestionKeyDown(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (!loading && question.trim()) {
+      event.currentTarget.form?.requestSubmit()
+    }
+  }
+
   function askAnother() {
     setQuestion('')
     setResponse(null)
@@ -126,6 +134,7 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
       <textarea id={documentId ? 'study-baseai-question' : 'baseai-question'} rows={compact ? 3 : 4}
         maxLength={2000} value={question} disabled={loading}
         onChange={(event) => setQuestion(event.target.value)}
+        onKeyDown={handleQuestionKeyDown}
         placeholder={documentId ? `Ask a question about ${documentTitle || 'this PDF'}…` : 'Ask about a policy, process, or company resource…'} />
       <div className="baseai-form-actions"><span>{question.length}/2000</span>
         <button className="button button-primary" disabled={loading || !question.trim()}>
