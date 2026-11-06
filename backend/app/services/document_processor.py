@@ -116,12 +116,12 @@ def extract_document_pages(file_path, file_type):
                         if getattr(shape, "has_table", False):
                             values.extend(" | ".join(cell.text.strip() for cell in row.cells)
                                           for row in shape.table.rows)
-                    pages.append((number, f"Slide {number}:\n" + "\n".join(values).strip()))
+                    pages.append((number, "\n".join(values).strip()))
             else:
                 if "xl/workbook.xml" not in names:
                     raise ValueError("The XLSX workbook is invalid.")
                 from openpyxl import load_workbook
-                workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True, keep_links=False)
+                workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
                 pages = []
                 for sheet in workbook.worksheets:
                     rows = []
@@ -153,9 +153,119 @@ def extract_document_pages(file_path, file_type):
     except (OSError, UnicodeError, RuntimeError, zipfile.BadZipFile, pymupdf.FileDataError,
             pymupdf.EmptyFileError, KeyError, csv.Error) as exc:
         raise ValueError(f"The {kind} document is corrupted or could not be read.") from exc
-    if not any(text and text.strip() for _, text in pages):
+    if kind != "PPTX" and not any(text and text.strip() for _, text in pages):
         raise ValueError("The document contains no extractable text.")
     return pages
+
+
+def extract_docx_structure(file_path):
+    """Return ordered, presentation-oriented DOCX blocks for the study preview."""
+    content = _read(file_path)
+    names = _check_office_archive(content)
+    if "word/document.xml" not in names:
+        raise ValueError("The DOCX document is invalid.")
+
+    from docx import Document as WordDocument
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    try:
+        document = WordDocument(io.BytesIO(content))
+        blocks = []
+        for item in document.iter_inner_content():
+            if isinstance(item, Paragraph):
+                text = item.text.strip()
+                if not text:
+                    continue
+                style_name = item.style.name if item.style else "Normal"
+                style_lower = style_name.lower()
+                if style_lower.startswith("heading"):
+                    kind = "heading"
+                    level_text = style_lower.removeprefix("heading").strip()
+                    level = int(level_text) if level_text.isdigit() else 2
+                elif style_lower == "title":
+                    kind, level = "title", 1
+                elif style_lower == "subtitle":
+                    kind, level = "subtitle", 0
+                elif "list bullet" in style_lower or "list number" in style_lower:
+                    kind = "list_item"
+                    level = int(style_lower.rsplit(" ", 1)[-1]) - 1 if style_lower.rsplit(" ", 1)[-1].isdigit() else 0
+                else:
+                    kind, level = "paragraph", 0
+
+                runs = []
+                for run in item.runs:
+                    if not run.text:
+                        continue
+                    runs.append({
+                        "text": run.text,
+                        "bold": bool(run.bold),
+                        "italic": bool(run.italic),
+                        "underline": bool(run.underline),
+                        "strike": bool(run.font.strike),
+                        "superscript": bool(run.font.superscript),
+                        "subscript": bool(run.font.subscript),
+                    })
+                blocks.append({
+                    "type": kind,
+                    "level": level,
+                    "ordered": "list number" in style_lower,
+                    "text": text,
+                    "runs": runs,
+                })
+            elif isinstance(item, Table):
+                rows = []
+                for row in item.rows:
+                    rows.append([cell.text.strip() for cell in row.cells])
+                if rows:
+                    blocks.append({"type": "table", "rows": rows})
+
+        return blocks
+    except (OSError, UnicodeError, RuntimeError, KeyError) as exc:
+        raise ValueError("The DOCX document is corrupted or could not be read.") from exc
+
+
+def extract_spreadsheet_structure(file_path, file_type):
+    """Return editable cell grids for CSV and XLSX study previews."""
+    content = _read(file_path)
+    kind = (file_type or "").upper()
+    if kind == "CSV":
+        text = _decode_text(content)
+        try:
+            dialect = csv.Sniffer().sniff(text[:8192], delimiters=",\t;|")
+        except csv.Error:
+            dialect = csv.excel
+        rows = []
+        for row_number, row in enumerate(csv.reader(io.StringIO(text), dialect), 1):
+            if row_number > MAX_ROWS:
+                break
+            rows.append([str(value) for value in row])
+        return [{"name": "CSV data", "rows": rows}]
+    if kind != "XLSX":
+        raise ValueError("Spreadsheet preview supports CSV and XLSX files.")
+
+    names = _check_office_archive(content)
+    if "xl/workbook.xml" not in names:
+        raise ValueError("The XLSX workbook is invalid.")
+    from openpyxl import load_workbook
+
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
+        sheets = []
+        for sheet in workbook.worksheets:
+            rows = []
+            for row_number, row in enumerate(sheet.iter_rows(values_only=True), 1):
+                if row_number > MAX_ROWS:
+                    break
+                values = ["" if value is None else str(value) for value in row]
+                rows.append(values)
+            while rows and not any(str(value).strip() for value in rows[-1]):
+                rows.pop()
+            sheets.append({"name": sheet.title, "rows": rows})
+        workbook.close()
+        return sheets
+    except (OSError, UnicodeError, RuntimeError, KeyError, zipfile.BadZipFile) as exc:
+        raise ValueError("The XLSX workbook is corrupted or could not be read.") from exc
 
 
 def extract_pdf_outline(file_path):

@@ -12,10 +12,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import db
 from app.models import AuditEvent, Document, DocumentChunk, User
 from app.services.audit import record_admin_action
-from app.services.document_workflow import DocumentUploadError, create_document_upload
-from app.services.document_processor import extract_document_pages, extract_pdf_outline
+from app.services.document_workflow import DocumentUploadError, create_document_upload, update_spreadsheet_document
+from app.services.document_processor import extract_document_pages, extract_docx_structure, extract_pdf_outline, extract_spreadsheet_structure
 from app.services.embedding_service import EmbeddingError
 from app.services.ollama_client import OllamaError
+from app.services.office_renderer import OfficeRendererUnavailable, SlideRenderError, render_pptx_slide
 from app.services.rag_service import RagValidationError, answer_question, validate_question
 from app.services.semantic_search import SearchDatabaseError
 from app.services.storage import StorageError, get_storage
@@ -341,13 +342,50 @@ def study_document_pages(document_id):
     try:
         pages = extract_document_pages(content, document.file_type)
         outline = extract_pdf_outline(content) if document.file_type == "PDF" else []
+        structure = extract_docx_structure(content) if document.file_type == "DOCX" else []
+        spreadsheet = extract_spreadsheet_structure(content, document.file_type) if document.file_type in {"CSV", "XLSX"} else []
     except ValueError:
         return _error("Document text could not be extracted.", 422)
     return jsonify({
         "status": "success", "document_id": document.id,
         "pages": [{"page_number": number, "text": text} for number, text in pages],
+        "structure": structure,
+        "spreadsheet": spreadsheet,
         "outline": outline,
     }), 200
+
+
+@shared_bp.put("/<int:document_id>/spreadsheet")
+@jwt_required()
+def update_study_spreadsheet(document_id):
+    """Persist authorized cell edits to a user's CSV or XLSX document."""
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return _error("Invalid authentication token.", 401)
+    user = db.session.get(User, user_id)
+    if user is None or not user.is_active or not user.is_verified:
+        return _error("Active verified user account required.", 403)
+    document = _protected_document(document_id, user=user)
+    if document is None or document.file_type not in {"CSV", "XLSX"}:
+        return _error("Spreadsheet not found.", 404)
+    if document.uploaded_by != user.id and user.role != "ADMIN":
+        return _error("Only the document owner or an administrator can edit this spreadsheet.", 403)
+    if document.status != "PROCESSED":
+        return _error("Only processed spreadsheets can be edited.", 409)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _error("A spreadsheet edit object is required.", 400)
+    try:
+        content = get_storage().read(document.stored_filename)
+        updated = update_spreadsheet_document(document, user, content, payload)
+    except FileNotFoundError:
+        return _error("Document file is missing from storage.", 404)
+    except StorageError:
+        return _error("Document storage is unavailable.", 503)
+    except DocumentUploadError as exc:
+        return _error(str(exc), exc.status_code)
+    return jsonify({"status": "success", "document": updated.to_dict()}), 200
 
 
 @shared_bp.get("/<int:document_id>/pages/<int:page_number>/render")
@@ -403,6 +441,48 @@ def render_study_document_page(document_id, page_number):
     except (OSError, pymupdf.FileDataError, pymupdf.FileNotFoundError,
             pymupdf.EmptyFileError, RuntimeError, ValueError):
         return _error("PDF page could not be rendered.", 422)
+
+    response = send_file(BytesIO(image_bytes), mimetype="image/png", max_age=0)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@shared_bp.get("/<int:document_id>/slides/<int:page_number>/render")
+@jwt_required()
+def render_study_pptx_slide(document_id, page_number):
+    """Render one authorized PPTX slide with its original Office layout."""
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return _error("Invalid authentication token.", 401)
+    user = db.session.get(User, user_id)
+    if user is None or not user.is_active or not user.is_verified:
+        return _error("Active verified user account required.", 403)
+
+    document = _protected_document(document_id, user=user)
+    if document is None or document.file_type != "PPTX":
+        return _error("PowerPoint presentation not found.", 404)
+    try:
+        scale = float(request.args.get("scale", "1.5"))
+    except ValueError:
+        return _error("scale must be a number between 0.75 and 3.", 400)
+    if not 0.75 <= scale <= 3:
+        return _error("scale must be a number between 0.75 and 3.", 400)
+    query = request.args.get("query", "").strip()
+    if len(query) > 2000:
+        return _error("query must not exceed 2000 characters.", 400)
+    try:
+        content = get_storage().read(document.stored_filename)
+        image_bytes = render_pptx_slide(content, page_number, scale, query)
+    except FileNotFoundError:
+        return _error("Document file is missing from storage.", 404)
+    except StorageError:
+        return _error("Document storage is unavailable.", 503)
+    except OfficeRendererUnavailable as exc:
+        return _error(str(exc), 503)
+    except SlideRenderError as exc:
+        return _error(str(exc), 422)
 
     response = send_file(BytesIO(image_bytes), mimetype="image/png", max_age=0)
     response.headers["X-Content-Type-Options"] = "nosniff"

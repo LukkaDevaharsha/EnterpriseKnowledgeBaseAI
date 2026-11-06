@@ -1,5 +1,5 @@
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AuthProvider from './context/AuthContext'
 import { useAuth } from './context/useAuth'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -21,7 +21,7 @@ const PAGE_TITLES = {
   '/admin': 'Administration',
 }
 
-function ApplicationLayout() {
+function ApplicationLayout({ theme, setTheme }) {
   const { user, logout } = useAuth()
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -60,6 +60,16 @@ function ApplicationLayout() {
             </div>
           </div>
           <div className="header-actions">
+            <button type="button" className="theme-toggle"
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.6 8.6 0 0 1 8.9 3.8 8.8 8.8 0 1 0 20.2 15.1Z" /></svg>
+              )}
+            </button>
             <div className="profile-summary">
               <span className="profile-avatar">{user?.name?.trim()?.[0]?.toUpperCase() || 'U'}</span>
               <span className="profile-meta">
@@ -99,12 +109,12 @@ function NotFound() {
   )
 }
 
-function RouteTree() {
+function RouteTree({ theme, setTheme }) {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      <Route element={<ProtectedRoute><ApplicationLayout /></ProtectedRoute>}>
+      <Route element={<ProtectedRoute><ApplicationLayout theme={theme} setTheme={setTheme} /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />
         <Route path="library" element={<Library />} />
         <Route path="ask" element={<AskQuestion />} />
@@ -120,5 +130,11 @@ function RouteTree() {
 }
 
 export default function App() {
-  return <BrowserRouter><AuthProvider><RouteTree /></AuthProvider></BrowserRouter>
+  const [theme, setTheme] = useState(() => localStorage.getItem('ekb-theme') || 'dark')
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('ekb-theme', theme)
+  }, [theme])
+
+  return <BrowserRouter><AuthProvider><RouteTree theme={theme} setTheme={setTheme} /></AuthProvider></BrowserRouter>
 }

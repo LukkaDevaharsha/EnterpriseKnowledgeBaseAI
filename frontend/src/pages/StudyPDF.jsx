@@ -17,6 +17,62 @@ function highlightText(text, query) {
   ))
 }
 
+function highlightRuns(runs, fallback, query) {
+  if (!runs?.length) return highlightText(fallback, query)
+  const fullText = runs.map((run) => run.text).join('')
+  const terms = [...new Set(query.trim().split(/\s+/).filter((term) => term.length > 1))]
+    .sort((first, second) => second.length - first.length)
+  const expression = terms.length
+    ? new RegExp(terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'ig')
+    : null
+  const ranges = []
+  if (expression) {
+    for (const match of fullText.matchAll(expression)) ranges.push([match.index, match.index + match[0].length])
+  }
+
+  function renderRun(text, offset) {
+    const end = offset + text.length
+    const pieces = []
+    let cursor = offset
+    ranges.forEach(([start, finish], index) => {
+      const from = Math.max(start, offset)
+      const to = Math.min(finish, end)
+      if (from >= to) return
+      if (from > cursor) pieces.push(text.slice(cursor - offset, from - offset))
+      pieces.push(<mark key={`${from}-${to}-${index}`}>{text.slice(from - offset, to - offset)}</mark>)
+      cursor = to
+    })
+    if (!pieces.length) return text
+    if (cursor < end) pieces.push(text.slice(cursor - offset))
+    return pieces
+  }
+
+  let offset = 0
+  return runs.map((run, index) => {
+    const text = run.text
+    let content = renderRun(text, offset)
+    offset += text.length
+    if (run.superscript) content = <sup>{content}</sup>
+    if (run.subscript) content = <sub>{content}</sub>
+    if (run.strike) content = <s>{content}</s>
+    if (run.underline) content = <u>{content}</u>
+    if (run.italic) content = <em>{content}</em>
+    if (run.bold) content = <strong>{content}</strong>
+    return <span key={index}>{content}</span>
+  })
+}
+
+function MatchMarkerRail({ matches, textLength, activeMatchIndex, onSelectMatch, className = '' }) {
+  if (!matches.length) return null
+  return <div className={`pdf-search-marker-rail ${className}`} aria-label="Search matches">
+    {matches.map((match) => <button key={match.matchIndex} type="button"
+      className={`pdf-search-marker${match.matchIndex === activeMatchIndex ? ' active' : ''}`}
+      style={{ top: `${match.top ?? Math.max(1, Math.min(98, (match.offset / Math.max(1, textLength)) * 100))}%` }}
+      aria-label={`Search match ${match.matchIndex + 1}`} title={`Match ${match.matchIndex + 1}`}
+      onClick={() => onSelectMatch(match.matchIndex, match.pageIndex)} />)}
+  </div>
+}
+
 function makeOutlineTree(entries) {
   const roots = []
   const stack = []
@@ -57,20 +113,339 @@ function AssistantIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.8-5.3 1.7-1.7 5.5-1.8-5.5L5 10.8 10.2 9 12 3.5Z" /><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" /></svg>
 }
 
-function DocumentPreview({ document: doc, pages }) {
+function DocxRuns({ runs, fallback, query }) {
+  return highlightRuns(runs, fallback, query)
+}
+
+function DocxBlocks({ blocks, query, zoom }) {
+  const rendered = []
+  for (let index = 0; index < blocks.length;) {
+    const block = blocks[index]
+    if (block.type === 'list_item') {
+      const ordered = Boolean(block.ordered)
+      const items = []
+      while (index < blocks.length && blocks[index].type === 'list_item' && Boolean(blocks[index].ordered) === ordered) {
+        items.push({ ...blocks[index], unitIndex: index })
+        index += 1
+      }
+      const List = ordered ? 'ol' : 'ul'
+      rendered.push(<List className="docx-list" key={`list-${index}`}>
+        {items.map((item, itemIndex) => <li id={`study-unit-${item.unitIndex}`} key={itemIndex} style={{ marginLeft: `${Math.max(0, item.level || 0) * 20}px` }}>
+          <DocxRuns runs={item.runs} fallback={item.text} query={query} />
+        </li>)}
+      </List>)
+      continue
+    }
+
+    const key = `block-${index}`
+    const content = <DocxRuns runs={block.runs} fallback={block.text} query={query} />
+    if (block.type === 'table') {
+      rendered.push(<div className="docx-table-wrap docx-block" id={`study-unit-${index}`} key={key}><table className="docx-table" style={{ fontSize: `${14 * zoom / 100}px` }}><tbody>
+        {block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => rowIndex === 0
+          ? <th key={cellIndex} scope="col">{highlightText(cell, query)}</th>
+          : <td key={cellIndex}>{highlightText(cell, query)}</td>)}</tr>)}
+      </tbody></table></div>)
+    } else if (block.type === 'title') rendered.push(<h1 className="docx-title docx-block" id={`study-unit-${index}`} key={key}
+      style={{ fontSize: `clamp(${28 * zoom / 100}px, ${4 * zoom / 100}vw, ${38 * zoom / 100}px)` }}>{content}</h1>)
+    else if (block.type === 'subtitle') rendered.push(<p className="docx-subtitle docx-block" id={`study-unit-${index}`} key={key}
+      style={{ fontSize: `${18 * zoom / 100}px` }}>{content}</p>)
+    else if (block.type === 'heading') {
+      const Heading = `h${Math.min(6, Math.max(2, block.level || 2))}`
+      rendered.push(<Heading className="docx-heading docx-block" id={`study-unit-${index}`} key={key}>{content}</Heading>)
+    } else rendered.push(<p className="docx-paragraph docx-block" id={`study-unit-${index}`} key={key}>{content}</p>)
+    index += 1
+  }
+  return rendered
+}
+
+function PreviewUnit({ index, onVisible, className, style, matches, textLength, activeMatchIndex, onSelectMatch, children }) {
+  const elementRef = useRef(null)
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.15) onVisible(index)
+    }, { threshold: 0.15 })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [index, onVisible])
+
+  return <article id={`study-unit-${index}`} ref={elementRef} className={className} style={style}>
+    {children}
+    <MatchMarkerRail matches={matches} textLength={textLength} activeMatchIndex={activeMatchIndex}
+      onSelectMatch={onSelectMatch} className="document-search-marker-rail" />
+  </article>
+}
+
+function PptxSlidePreview({ token, documentId, page, index, zoom, fitWidth, query, matches, activeMatchIndex, onVisible, onSelectMatch }) {
+  const slideNumber = page.page_number || index + 1
+  const [nearViewport, setNearViewport] = useState(false)
+  const [image, setImage] = useState(null)
+  const [error, setError] = useState(null)
+  const [retry, setRetry] = useState(0)
+  const elementRef = useRef(null)
+  const imageKey = `${documentId}:${slideNumber}:${query}:${retry}`
+
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver(([entry]) => {
+      setNearViewport(entry.isIntersecting)
+      if (!entry.isIntersecting) setImage(null)
+    }, { rootMargin: '700px 0px' })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.15) onVisible(index)
+    }, { threshold: 0.15 })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [index, onVisible])
+
+  useEffect(() => {
+    if (!nearViewport && typeof IntersectionObserver !== 'undefined') return undefined
+    let active = true
+    let objectUrl = ''
+    studyApi.renderSlide(token, documentId, slideNumber, 1.5, query.trim())
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        if (!active) { URL.revokeObjectURL(objectUrl); return }
+        setError(null)
+        setImage({ key: imageKey, url: objectUrl })
+      })
+      .catch((requestError) => { if (active) setError({ key: imageKey, message: requestError.message }) })
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [nearViewport, token, documentId, slideNumber, query, retry, imageKey])
+
+  const readyImage = image?.key === imageKey ? image : null
+  const renderError = error?.key === imageKey ? error : null
+
+  return <article id={`study-unit-${index}`} ref={elementRef} className={`pptx-slide-card${matches.length ? ' has-matches' : ''}`} aria-label={`Slide ${slideNumber}`}>
+    <div className="pptx-slide-viewport">
+      {readyImage && <img className="pptx-slide-image" src={readyImage.url} alt={`Slide ${slideNumber}`} style={{ width: previewWidth(fitWidth, zoom) }} />}
+      {!readyImage && !renderError && <div className="pptx-slide-placeholder" aria-hidden="true"><PageLoading label={`Rendering slide ${slideNumber}…`} /></div>}
+      {renderError && <div className="pptx-slide-error"><ErrorMessage>{renderError.message}</ErrorMessage>
+        <button type="button" className="button button-secondary button-small" onClick={() => setRetry((count) => count + 1)}>Retry slide</button></div>}
+    </div>
+    <MatchMarkerRail matches={matches} textLength={page.text.length} activeMatchIndex={activeMatchIndex}
+      onSelectMatch={onSelectMatch} className="pptx-slide-marker-rail" />
+    <span className="rendered-pdf-page-label">Slide {slideNumber}</span>
+  </article>
+}
+
+function locateSpreadsheetCell(text, offset) {
+  let cursor = 0
+  const lines = text.split('\n')
+  for (const line of lines) {
+    const rowPrefix = line.match(/^Row (\d+): /)
+    if (!rowPrefix) { cursor += line.length + 1; continue }
+    const rowIndex = Number(rowPrefix[1]) - 1
+    let cellStart = cursor + rowPrefix[0].length
+    const cells = line.slice(rowPrefix[0].length).split(' | ')
+    for (let columnIndex = 0; columnIndex < cells.length; columnIndex += 1) {
+      const end = cellStart + cells[columnIndex].length
+      if (offset >= cellStart && offset <= end) return { rowIndex, columnIndex }
+      cellStart = end + 3
+    }
+    cursor += line.length + 1
+  }
+  return null
+}
+
+function columnName(index) {
+  let number = index + 1
+  let label = ''
+  while (number > 0) {
+    number -= 1
+    label = String.fromCharCode(65 + number % 26) + label
+    number = Math.floor(number / 26)
+  }
+  return label
+}
+
+function previewWidth(fitWidth, zoom) {
+  return fitWidth || zoom <= 100 ? '100%' : `${zoom}%`
+}
+
+function cloneSheets(spreadsheets) {
+  return spreadsheets.map((sheet) => ({ name: sheet.name, rows: sheet.rows.map((row) => [...row]) }))
+}
+
+function SpreadsheetEditor({ document: doc, spreadsheets, pages, query, zoom, fitWidth, activeSheetIndex, matches, activeMatchIndex, canEdit, token, onSelectUnit, onSelectMatch, onSaved }) {
+  const [sheets, setSheets] = useState(() => cloneSheets(spreadsheets))
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
+  const sheetIndex = Math.max(0, Math.min(activeSheetIndex, sheets.length - 1))
+  const sheet = sheets[sheetIndex]
+  if (!sheet) return <div className="reader-empty"><EmptyState title="Spreadsheet is empty">No worksheet data is available.</EmptyState></div>
+
+  const pageText = pages[sheetIndex]?.text || ''
+  const sheetMatches = matches.filter((match) => match.pageIndex === sheetIndex)
+  const activeMatch = matches.find((match) => match.matchIndex === activeMatchIndex && match.pageIndex === sheetIndex)
+  const activeCell = activeMatch ? locateSpreadsheetCell(pageText, activeMatch.offset) : null
+  const columnCount = Math.max(1, ...sheet.rows.map((row) => row.length))
+
+  function updateCell(rowIndex, columnIndex, value) {
+    setSheets((previous) => previous.map((item, currentSheet) => {
+      if (currentSheet !== sheetIndex) return item
+      const rows = item.rows.map((row) => [...row])
+      while (rows.length <= rowIndex) rows.push([])
+      while (rows[rowIndex].length <= columnIndex) rows[rowIndex].push('')
+      rows[rowIndex][columnIndex] = value
+      return { ...item, rows }
+    }))
+    setSaveMessage('')
+  }
+
+  function addRow() {
+    setSheets((previous) => previous.map((item, currentSheet) => currentSheet === sheetIndex
+      ? { ...item, rows: [...item.rows, Array(columnCount).fill('')] }
+      : item))
+    setEditing(true)
+    setSaveMessage('')
+  }
+
+  function changesToSave() {
+    const changes = []
+    const appendRows = []
+    spreadsheets.forEach((original, currentSheet) => {
+      const updated = sheets[currentSheet]
+      original.rows.forEach((row, rowIndex) => {
+        const nextRow = updated.rows[rowIndex] || []
+        for (let columnIndex = 0; columnIndex < Math.max(row.length, nextRow.length); columnIndex += 1) {
+          const before = row[columnIndex] ?? ''
+          const after = nextRow[columnIndex] ?? ''
+          if (before !== after) changes.push({ sheet_index: currentSheet, row_index: rowIndex, column_index: columnIndex, value: after })
+        }
+      })
+      updated.rows.slice(original.rows.length).forEach((row) => {
+        if (row.some((value) => value !== '')) appendRows.push({ sheet_index: currentSheet, values: row })
+      })
+    })
+    return { changes, append_rows: appendRows }
+  }
+
+  const pendingChanges = changesToSave()
+  const hasChanges = pendingChanges.changes.length > 0 || pendingChanges.append_rows.length > 0
+
+  async function save() {
+    setSaving(true)
+    setSaveError('')
+    setSaveMessage('')
+    try {
+      await studyApi.updateSpreadsheet(token, doc.id, pendingChanges)
+      setEditing(false)
+      setSaveMessage('Changes saved.')
+      onSaved()
+    } catch (error) {
+      setSaveError(error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function cancel() {
+    setSheets(cloneSheets(spreadsheets))
+    setEditing(false)
+    setSaveError('')
+    setSaveMessage('')
+  }
+
+  function selectMarker(matchIndex, unitIndex) {
+    onSelectMatch(matchIndex, unitIndex)
+    const match = matches.find((item) => item.matchIndex === matchIndex)
+    const cell = match && locateSpreadsheetCell(pages[unitIndex]?.text || '', match.offset)
+    if (cell) requestAnimationFrame(() => document.getElementById(`spreadsheet-cell-${unitIndex}-${cell.rowIndex}-${cell.columnIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }))
+  }
+
+  return <section id={`study-unit-${sheetIndex}`} className="spreadsheet-editor"
+    style={{ paddingRight: sheetMatches.length ? `${Math.max(22, zoom * 0.34)}px` : undefined }}>
+    {sheets.length > 1 && <div className="spreadsheet-tabs" role="tablist" aria-label="Worksheets">
+      {sheets.map((item, index) => <button key={`${index}-${item.name}`} type="button" role="tab"
+        aria-selected={sheetIndex === index} className={sheetIndex === index ? 'active' : ''}
+        onClick={() => onSelectUnit(index)}>{item.name}</button>)}
+    </div>}
+    <div className="spreadsheet-toolbar">
+      <span>{sheet.name} · {sheet.rows.length} rows</span>
+      <div className="spreadsheet-edit-actions">
+        {canEdit && !editing && <button className="button button-secondary button-small" type="button" onClick={() => { setEditing(true); setSaveMessage('') }}>Edit cells</button>}
+        {canEdit && editing && <>
+          <button className="button button-secondary button-small" type="button" onClick={addRow}>Add row</button>
+          <button className="button button-primary button-small" type="button" disabled={!hasChanges || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button>
+          <button className="button button-tertiary button-small" type="button" disabled={saving} onClick={cancel}>Cancel</button>
+        </>}
+      </div>
+    </div>
+    {saveError && <div className="alert alert-error">{saveError}</div>}
+    {saveMessage && <div className="alert alert-success">{saveMessage}</div>}
+    <div className="spreadsheet-table-scroll">
+      <table className="spreadsheet-table" style={{ width: previewWidth(fitWidth, zoom), minWidth: previewWidth(fitWidth, zoom), fontSize: `${14 * zoom / 100}px` }}>
+        <thead><tr><th className="spreadsheet-row-number" aria-label="Row number">#</th>
+          {Array.from({ length: columnCount }, (_, index) => <th key={index}>{columnName(index)}</th>)}
+        </tr></thead>
+        <tbody>{sheet.rows.map((row, rowIndex) => <tr key={rowIndex}>
+          <th className="spreadsheet-row-number" scope="row">{rowIndex + 1}</th>
+          {Array.from({ length: Math.max(columnCount, row.length) }, (_, columnIndex) => {
+            const value = row[columnIndex] ?? ''
+            const selected = activeCell?.rowIndex === rowIndex && activeCell?.columnIndex === columnIndex
+            return <td id={`spreadsheet-cell-${sheetIndex}-${rowIndex}-${columnIndex}`} key={columnIndex} className={selected ? 'active-match' : ''}
+              ref={selected ? (element) => element?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }) : undefined}>
+              {editing
+                ? <input aria-label={`${sheet.name}, row ${rowIndex + 1}, column ${columnName(columnIndex)}`} value={value}
+                  onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)} />
+                : highlightText(value, query)}
+            </td>
+          })}
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <MatchMarkerRail matches={sheetMatches} textLength={pageText.length} activeMatchIndex={activeMatchIndex}
+      onSelectMatch={selectMarker} className="spreadsheet-search-marker-rail" />
+  </section>
+}
+
+function DocumentPreview({ document: doc, pages, structure = [], spreadsheet = [], token, documentId, query, zoom, fitWidth, matches, docxMarkers, docxTotalTextLength, activeMatchIndex, activeSheetIndex, canEdit, onSelectUnit, onVisible, onSelectMatch, onSaved }) {
   if (!doc || !pages.length) return <div className="reader-empty"><EmptyState title="Preview unavailable">This document has no readable extracted content.</EmptyState></div>
-  const tabular = ['CSV', 'XLSX'].includes(doc.file_type)
+  if (['CSV', 'XLSX'].includes(doc.file_type)) {
+    return <SpreadsheetEditor key={`${doc.id}:${doc.updated_at || ''}`} document={doc} spreadsheets={spreadsheet}
+      pages={pages} query={query} zoom={zoom} fitWidth={fitWidth} activeSheetIndex={activeSheetIndex} matches={matches}
+      activeMatchIndex={activeMatchIndex} canEdit={canEdit} token={token} onSelectUnit={onSelectUnit}
+      onSelectMatch={onSelectMatch} onSaved={onSaved} />
+  }
+  if (doc.file_type === 'PPTX') {
+    return <div className="pptx-slides-preview" aria-label="PowerPoint slide preview">
+      {pages.map((page, index) => <PptxSlidePreview key={`${doc.id}:${page.page_number || index + 1}`}
+        token={token} documentId={documentId} page={page} index={index} zoom={zoom} fitWidth={fitWidth} query={query}
+        matches={matches.filter((match) => match.pageIndex === index)} activeMatchIndex={activeMatchIndex}
+        onVisible={onVisible} onSelectMatch={onSelectMatch} />)}
+    </div>
+  }
+  if (doc.file_type === 'DOCX' && structure.length) {
+    return <div className="pdf-pages-scroll document-preview docx-preview" aria-label="Structured Word document preview">
+      <article className="docx-document" style={{ width: previewWidth(fitWidth, zoom), maxWidth: 'none', marginInline: 'auto', fontSize: `${16 * zoom / 100}px`, padding: zoom < 100 ? `clamp(${28 * zoom / 100}px, ${6 * zoom / 100}vw, ${76 * zoom / 100}px)` : undefined, paddingRight: docxMarkers.length ? `${Math.max(30, zoom * 0.68)}px` : undefined }}>
+        <DocxBlocks blocks={structure} query={query} zoom={zoom} />
+        <MatchMarkerRail matches={docxMarkers} textLength={docxTotalTextLength} activeMatchIndex={activeMatchIndex}
+          onSelectMatch={onSelectMatch} className="docx-search-marker-rail" />
+      </article>
+    </div>
+  }
   return <div className="pdf-pages-scroll document-preview" aria-label={`${doc.file_type} document preview`}>
-    {pages.map((page, index) => <article className="panel document-preview-page" key={`${doc.id}:${index}`}>
+    {pages.map((page, index) => <PreviewUnit index={index} onVisible={onVisible} className="panel document-preview-page" key={`${doc.id}:${index}`} style={{ width: previewWidth(fitWidth, zoom), maxWidth: 'none', marginInline: 'auto', fontSize: `${14 * zoom / 100}px`, paddingRight: matches.some((match) => match.pageIndex === index) ? `${Math.max(18, zoom * 0.32)}px` : undefined }}
+      matches={matches.filter((match) => match.pageIndex === index)} textLength={page.text.length}
+      activeMatchIndex={activeMatchIndex} onSelectMatch={onSelectMatch}>
       {page.page_number && <h3>Slide {page.page_number}</h3>}
-      {tabular ? <div className="table-wrap"><table className="documents-table"><tbody>{page.text.split('\n').filter(Boolean).map((line, row) => {
-        const cells = line.replace(/^Row \d+: /, '').split(' | ')
-        return <tr key={row}>{row === 0 && doc.file_type === 'CSV' ? cells.map((cell, col) => <th key={col}>{cell}</th>) : cells.map((cell, col) => <td key={col}>{cell}</td>)}</tr>
-      })}</tbody></table></div> : <div className="document-preview-text">{page.text.split('\n').map((line, row) => {
+      <div className="document-preview-text">{page.text.split('\n').map((line, row) => {
         const heading = /^#{1,6}\s+/.test(line) || line.startsWith('Heading: ')
-        return heading ? <h3 key={row}>{line.replace(/^#{1,6}\s+/, '').replace(/^Heading: /, '')}</h3> : <p key={row}>{line || '\u00a0'}</p>
-      })}</div>}
-    </article>)}
+        return heading ? <h3 key={row}>{highlightText(line.replace(/^#{1,6}\s+/, '').replace(/^Heading: /, ''), query)}</h3> : <p key={row}>{line ? highlightText(line, query) : '\u00a0'}</p>
+      })}</div>
+    </PreviewUnit>)}
   </div>
 }
 
@@ -151,7 +526,7 @@ function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, o
 }
 
 export default function StudyPDF() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedDocumentId = searchParams.get('document_id')
@@ -161,6 +536,8 @@ export default function StudyPDF() {
   const [documents, setDocuments] = useState([])
   const [documentId, setDocumentId] = useState('')
   const [pages, setPages] = useState([])
+  const [docxStructure, setDocxStructure] = useState([])
+  const [spreadsheetData, setSpreadsheetData] = useState([])
   const [outline, setOutline] = useState([])
   const [pageIndex, setPageIndex] = useState(0)
   const [query, setQuery] = useState(() => initialSearchQuery)
@@ -189,6 +566,8 @@ export default function StudyPDF() {
       setDocumentId(initial ? String(initial.id) : '')
       setDocumentLoading(Boolean(initial))
       setPages([])
+      setDocxStructure([])
+      setSpreadsheetData([])
       setOutline([])
       setPdfUrl('')
       setPageIndex(0)
@@ -210,6 +589,8 @@ export default function StudyPDF() {
         if (!active) { URL.revokeObjectURL(objectUrl); return }
         const nextPages = pageData.pages || []
         setPages(nextPages)
+        setDocxStructure(pageData.structure || [])
+        setSpreadsheetData(pageData.spreadsheet || [])
         setOutline(pageData.outline || [])
         const pageIndexFromUrl = nextPages.findIndex((page, index) => (page.page_number || index + 1) === requestedPageNumber)
         setPageIndex(pageIndexFromUrl >= 0 ? pageIndexFromUrl : 0)
@@ -231,10 +612,17 @@ export default function StudyPDF() {
 
 
 
+  const selectedDocument = documents.find((doc) => String(doc.id) === documentId)
+  const canEditSpreadsheet = Boolean(selectedDocument && (user?.role === 'ADMIN' || String(selectedDocument.uploaded_by) === String(user?.id)))
+  const searchUnits = useMemo(() => selectedDocument?.file_type === 'DOCX' && docxStructure.length
+    ? docxStructure.map((block) => ({
+      text: block.type === 'table' ? block.rows.map((row) => row.join(' | ')).join('\n') : block.text || '',
+    }))
+    : pages, [selectedDocument?.file_type, docxStructure, pages])
   const matches = useMemo(() => {
     const term = query.trim().toLocaleLowerCase()
     if (!term) return []
-    const exact = pages.flatMap((page, index) => {
+    const exact = searchUnits.flatMap((page, index) => {
       const text = page.text.toLocaleLowerCase()
       const found = []
       let offset = 0
@@ -244,9 +632,9 @@ export default function StudyPDF() {
       }
       return found
     })
-    if (exact.length) return exact
+    if (exact.length) return exact.map((match, matchIndex) => ({ ...match, matchIndex }))
     const terms = [...new Set(term.match(/[\p{L}\p{N}_]+/gu) || [])].filter((word) => word.length > 1)
-    return pages.flatMap((page, index) => {
+    return searchUnits.flatMap((page, index) => {
       const text = page.text.toLocaleLowerCase()
       return terms.flatMap((word) => {
         const found = []
@@ -257,16 +645,34 @@ export default function StudyPDF() {
         }
         return found
       }).sort((first, second) => first.offset - second.offset)
-    })
-  }, [pages, query])
-  const outlineTree = useMemo(() => makeOutlineTree(outline), [outline])
+    }).map((match, matchIndex) => ({ ...match, matchIndex }))
+  }, [searchUnits, query])
+  const docxTotalTextLength = searchUnits.reduce((total, unit) => total + unit.text.length + 1, 0)
+  const docxUnitOffsets = []
+  searchUnits.forEach((unit, index) => {
+    docxUnitOffsets[index] = index ? docxUnitOffsets[index - 1] + searchUnits[index - 1].text.length + 1 : 0
+  })
+  const docxMarkers = selectedDocument?.file_type === 'DOCX'
+    ? matches.map((match) => ({ ...match, top: ((docxUnitOffsets[match.pageIndex] + match.offset) / Math.max(1, docxTotalTextLength)) * 100 }))
+    : []
+  const outlineEntries = selectedDocument?.file_type === 'DOCX'
+    ? docxStructure.flatMap((block, index) => ['heading', 'title'].includes(block.type)
+      ? [{ level: block.level || 1, title: block.text, page_number: index + 1 }]
+      : [])
+    : outline
+  const outlineTree = useMemo(() => makeOutlineTree(outlineEntries), [outlineEntries])
   const currentPage = pages[pageIndex]
-  const selectedDocument = documents.find((doc) => String(doc.id) === documentId)
   const pageNumber = currentPage?.page_number || pageIndex + 1
   const pageMatches = matches.filter((match) => match.pageIndex === pageIndex)
-  const matchingExcerpt = currentPage?.text && pageMatches.length
-    ? currentPage.text.slice(Math.max(0, pageMatches[0].offset - 150), pageMatches[0].offset + 570)
-    : ''
+  const activeMatch = matches[matchIndex]
+  const activeMatchUnit = activeMatch ? searchUnits[activeMatch.pageIndex] : null
+  const matchingExcerpt = selectedDocument?.file_type === 'PDF'
+    ? currentPage?.text && pageMatches.length
+      ? currentPage.text.slice(Math.max(0, pageMatches[0].offset - 150), pageMatches[0].offset + 570)
+      : ''
+    : activeMatchUnit?.text
+      ? activeMatchUnit.text.slice(Math.max(0, activeMatch.offset - 150), activeMatch.offset + 570)
+      : ''
   const sourcePageIsCurrent = Number.isInteger(requestedPageNumber) && pageNumber === requestedPageNumber
   const visibleExcerpt = sourcePageIsCurrent ? sourceExcerpt || matchingExcerpt : matchingExcerpt
 
@@ -284,6 +690,8 @@ export default function StudyPDF() {
     setDocumentLoading(true)
     setError('')
     setPages([])
+    setDocxStructure([])
+    setSpreadsheetData([])
     setOutline([])
     setPdfUrl('')
     setPageIndex(0)
@@ -303,12 +711,28 @@ export default function StudyPDF() {
     }
   }
 
+  function goToUnitIndex(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= searchUnits.length) return
+    setPageIndex(index)
+    document.getElementById(`study-unit-${index}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
   function navigateMatch(direction) {
     if (!matches.length) return
     const next = (matchIndex + direction + matches.length) % matches.length
     setExcerptOpen(false)
     setMatchIndex(next)
-    goToPage(pages[matches[next].pageIndex]?.page_number || matches[next].pageIndex + 1)
+    if (selectedDocument?.file_type === 'PDF') {
+      goToPage(pages[matches[next].pageIndex]?.page_number || matches[next].pageIndex + 1)
+    } else {
+      goToUnitIndex(matches[next].pageIndex)
+    }
+  }
+
+  function selectSearchMatch(index, unitIndex) {
+    setMatchIndex(index)
+    setExcerptOpen(false)
+    goToUnitIndex(unitIndex)
   }
 
   function toggleOutline(key) {
@@ -343,7 +767,7 @@ export default function StudyPDF() {
     </header>
     <ErrorMessage>{error}</ErrorMessage>
     <div className={`study-workspace${libraryOpen ? ' library-open' : ''}`}>
-      {libraryOpen && <aside className="study-library panel" aria-label="PDF library and table of contents">
+      {libraryOpen && <aside className="study-library panel" aria-label="Document library and table of contents">
         <div className="study-panel-heading"><div><span className="eyebrow">DOCUMENT LIBRARY</span><h2>Study materials</h2></div><span className="heading-count">{documents.length}</span></div>
         <nav className="study-document-list" aria-label="Available documents">
           {documents.map((doc) => {
@@ -357,9 +781,15 @@ export default function StudyPDF() {
           })}
         </nav>
         <div className="study-outline-heading"><span className="eyebrow">TABLE OF CONTENTS</span></div>
-        {selectedDocument?.file_type === 'PDF' && outlineTree.length
-          ? <ul className="study-outline"><OutlineItems items={outlineTree} collapsed={collapsed} toggle={toggleOutline} goToPage={goToPage} currentPage={pageNumber} /></ul>
-          : selectedDocument?.file_type === 'PDF' && <p className="outline-empty">This PDF has no saved bookmarks. Use page navigation or search its text.</p>}
+        {(selectedDocument?.file_type === 'PDF' || selectedDocument?.file_type === 'DOCX') && outlineTree.length
+          ? <ul className="study-outline"><OutlineItems items={outlineTree} collapsed={collapsed} toggle={toggleOutline}
+            goToPage={selectedDocument.file_type === 'DOCX' ? (number) => goToUnitIndex(number - 1) : goToPage}
+            currentPage={selectedDocument.file_type === 'DOCX' ? pageIndex + 1 : pageNumber} /></ul>
+          : selectedDocument?.file_type === 'PDF'
+            ? <p className="outline-empty">This PDF has no saved bookmarks. Use page navigation or search its text.</p>
+            : selectedDocument?.file_type === 'DOCX'
+              ? <p className="outline-empty">This Word document has no heading styles for a table of contents.</p>
+              : null}
       </aside>}
       {libraryOpen && <button type="button" className="study-library-backdrop" aria-label="Close PDF navigation" onClick={() => setLibraryOpen(false)} />}
 
@@ -374,20 +804,32 @@ export default function StudyPDF() {
               aria-expanded={assistantOpen} onClick={() => setAssistantOpen(true)}><AssistantIcon /><span>Ask BaseAI</span></button>
           </div>
         </div>
-        {selectedDocument?.file_type === 'PDF' && <div className="reader-search-tools">
-          <label className="sr-only" htmlFor="study-search">Search this PDF</label>
-          <input id="study-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setMatchIndex(0); setExcerptOpen(false) }} placeholder="Search text in this PDF" />
-          <span className="study-match-count" aria-live="polite">{query ? `${matches.length ? matchIndex + 1 : 0} of ${matches.length} matches` : 'Search within PDF'}</span>
+        {selectedDocument && <div className="reader-search-tools">
+          <label className="sr-only" htmlFor="study-search">Search this {selectedDocument.file_type} document</label>
+          <input id="study-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setMatchIndex(0); setExcerptOpen(false) }} placeholder={`Search ${selectedDocument.file_type} content`} />
+          <span className="study-match-count" aria-live="polite">{query ? `${matches.length ? matchIndex + 1 : 0} of ${matches.length} matches` : `Search within ${selectedDocument.file_type}`}</span>
           <button type="button" className="button button-secondary button-small" onClick={() => navigateMatch(-1)} disabled={!matches.length} aria-label="Previous search match">Previous</button>
           <button type="button" className="button button-secondary button-small" onClick={() => navigateMatch(1)} disabled={!matches.length} aria-label="Next search match">Next</button>
           <button type="button" className="button button-tertiary button-small" onClick={() => { setQuery(''); setMatchIndex(0); setExcerptOpen(false) }} disabled={!query}>Clear</button>
         </div>}
-        {selectedDocument?.file_type === 'PDF' && <div className="reader-controls">
-          <button className="button button-secondary button-small" type="button" disabled={pageIndex <= 0} onClick={() => goToPage(pageNumber - 1)}>Previous page</button>
-          <label>Page <input aria-label="Current page" type="number" min="1" max={pages.length} value={pageNumber}
-            onChange={(event) => goToPage(Number(event.target.value))} /></label>
-          <span>of {pages.length}</span>
-          <button className="button button-secondary button-small" type="button" disabled={pageIndex >= pages.length - 1} onClick={() => goToPage(pageNumber + 1)}>Next page</button>
+        {selectedDocument && <div className="reader-controls">
+          {selectedDocument.file_type === 'PDF' && <>
+            <button className="button button-secondary button-small" type="button" disabled={pageIndex <= 0} onClick={() => goToPage(pageNumber - 1)}>Previous page</button>
+            <label>Page <input aria-label="Current page" type="number" min="1" max={pages.length} value={pageNumber}
+              onChange={(event) => goToPage(Number(event.target.value))} /></label>
+            <span>of {pages.length}</span>
+            <button className="button button-secondary button-small" type="button" disabled={pageIndex >= pages.length - 1} onClick={() => goToPage(pageNumber + 1)}>Next page</button>
+          </>}
+          {selectedDocument.file_type === 'PPTX' && <>
+            <button className="button button-secondary button-small" type="button" disabled={pageIndex <= 0} onClick={() => goToUnitIndex(pageIndex - 1)}>Previous slide</button>
+            <span>Slide {pageIndex + 1} of {pages.length}</span>
+            <button className="button button-secondary button-small" type="button" disabled={pageIndex >= pages.length - 1} onClick={() => goToUnitIndex(pageIndex + 1)}>Next slide</button>
+          </>}
+          {selectedDocument.file_type === 'XLSX' && <>
+            <button className="button button-secondary button-small" type="button" disabled={pageIndex <= 0} onClick={() => goToUnitIndex(pageIndex - 1)}>Previous sheet</button>
+            <span>Sheet {pageIndex + 1} of {pages.length}</span>
+            <button className="button button-secondary button-small" type="button" disabled={pageIndex >= pages.length - 1} onClick={() => goToUnitIndex(pageIndex + 1)}>Next sheet</button>
+          </>}
           <span className="reader-control-divider" />
           <button className="button button-tertiary button-small" type="button" aria-label="Zoom out" disabled={fitWidth || zoom <= 50} onClick={() => setZoom((value) => Math.max(50, value - 10))}>−</button>
           <span className="zoom-value">{fitWidth ? 'Fit width' : `${zoom}%`}</span>
@@ -396,7 +838,24 @@ export default function StudyPDF() {
         </div>}
         {documentLoading ? <div className="reader-empty"><PageLoading label="Opening document preview…" /></div>
           : error ? <div className="reader-empty"><ErrorMessage>{error}</ErrorMessage><button className="button button-secondary" onClick={retry}>Retry document</button></div>
-            : selectedDocument?.file_type !== 'PDF' ? <DocumentPreview document={selectedDocument} pages={pages} />
+            : selectedDocument?.file_type !== 'PDF' ? <>
+              {query && visibleExcerpt && <section className="study-source-excerpt">
+                <div className="study-excerpt-heading"><span>Match {matchIndex + 1} of {matches.length}</span>
+                  <button type="button" className="button button-secondary button-small"
+                    aria-expanded={excerptOpen} onClick={() => setExcerptOpen((open) => !open)}>
+                    {excerptOpen ? 'Close excerpt' : 'Open excerpt'}
+                  </button>
+                </div>
+                {excerptOpen && <p>{highlightText(visibleExcerpt, query)}</p>}
+              </section>}
+              {query && matches.length === 0 && <p className="reader-no-match">No matches found in this {selectedDocument.file_type} document.</p>}
+              <DocumentPreview document={selectedDocument} pages={pages} structure={docxStructure} spreadsheet={spreadsheetData}
+                token={token} documentId={documentId} query={query} zoom={zoom}
+                fitWidth={fitWidth} matches={matches} docxMarkers={docxMarkers}
+                docxTotalTextLength={docxTotalTextLength} activeMatchIndex={matchIndex}
+                activeSheetIndex={pageIndex} canEdit={canEditSpreadsheet} onSelectUnit={goToUnitIndex}
+                onVisible={onPageVisible} onSelectMatch={selectSearchMatch} onSaved={retry} />
+            </>
             : <>
               {visibleExcerpt && <section className="study-source-excerpt">
                 <div className="study-excerpt-heading">

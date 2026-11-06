@@ -7,3 +7,5 @@
 
 /*npm run dev*/ frontend t2
 /*ollama serve*/ in t3
+
+PPTX slide previews use LibreOffice on the backend host (`soffice` on `PATH`). Set `LIBREOFFICE_PATH` if the executable is installed elsewhere.

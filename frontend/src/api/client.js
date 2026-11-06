@@ -130,11 +130,17 @@ export const adminApi = {
 export const studyApi = {
   documents: (token) => apiRequest('/api/study/documents', { token }),
   pages: (token, id) => apiRequest(`/api/study/documents/${id}/pages`, { token }),
+  updateSpreadsheet: (token, id, changes) => apiRequest(`/api/study/documents/${id}/spreadsheet`, { token, method: 'PUT', body: changes }),
   pdf: (token, id) => authorizedBlob(token, `/api/study/documents/${id}/download`),
   renderPage: (token, id, pageNumber, query, scale = 1.5) => {
     const params = new URLSearchParams({ scale: String(scale) })
     if (query) params.set('query', query)
     return authorizedBlob(token, `/api/study/documents/${id}/pages/${pageNumber}/render?${params}`)
+  },
+  renderSlide: (token, id, slideNumber, scale = 1.5, query = '') => {
+    const params = new URLSearchParams({ scale: String(scale) })
+    if (query) params.set('query', query)
+    return authorizedBlob(token, `/api/study/documents/${id}/slides/${slideNumber}/render?${params}`)
   },
   ask: (token, id, question, topK = 5, signal) => ragApi.ask(token, question, topK, { documentId: id, signal }),
 }
