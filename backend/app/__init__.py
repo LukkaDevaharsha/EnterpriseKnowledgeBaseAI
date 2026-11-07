@@ -208,6 +208,14 @@ def create_app(config_overrides=None):
         os.getenv("GEMINI_TIMEOUT_SECONDS", "120")
     )
     app.config["EMAIL_PROVIDER"] = os.getenv("EMAIL_PROVIDER", "smtp")
+    app.config["BREVO_API_KEY"] = os.getenv("BREVO_API_KEY", "")
+    app.config["BREVO_SENDER_EMAIL"] = os.getenv("BREVO_SENDER_EMAIL", "")
+    app.config["BREVO_SENDER_NAME"] = os.getenv(
+        "BREVO_SENDER_NAME", "Enterprise Knowledge Base AI"
+    )
+    app.config["BREVO_TIMEOUT_SECONDS"] = float(
+        os.getenv("BREVO_TIMEOUT_SECONDS", "10")
+    )
     app.config["RESEND_API_KEY"] = os.getenv("RESEND_API_KEY", "")
     app.config["RESEND_FROM_EMAIL"] = os.getenv("RESEND_FROM_EMAIL", "")
     app.config["RESEND_TIMEOUT_SECONDS"] = float(
@@ -272,7 +280,7 @@ def create_app(config_overrides=None):
     for provider_key, supported in (
         ("LLM_PROVIDER", {"ollama", "gemini"}),
         ("EMBEDDING_PROVIDER", {"sentence_transformers", "gemini"}),
-        ("EMAIL_PROVIDER", {"smtp", "resend", "gmail_api"}),
+        ("EMAIL_PROVIDER", {"smtp", "resend", "gmail_api", "brevo"}),
     ):
         selected = str(app.config.get(provider_key, "")).strip().lower()
         if selected not in supported:
@@ -294,6 +302,10 @@ def create_app(config_overrides=None):
         app.config["GMAIL_TIMEOUT_SECONDS"]
     ) or app.config["GMAIL_TIMEOUT_SECONDS"] <= 0:
         raise RuntimeError("GMAIL_TIMEOUT_SECONDS must be greater than zero.")
+    if not isinstance(app.config["BREVO_TIMEOUT_SECONDS"], (int, float)) or not math.isfinite(
+        app.config["BREVO_TIMEOUT_SECONDS"]
+    ) or app.config["BREVO_TIMEOUT_SECONDS"] <= 0:
+        raise RuntimeError("BREVO_TIMEOUT_SECONDS must be greater than zero.")
 
     for mode_model_key in (
         "GENERAL_AI_MODEL", "COMPANY_KNOWLEDGE_MODEL", "STUDY_PDF_MODEL",

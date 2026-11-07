@@ -1,4 +1,4 @@
-"""SMTP and Resend delivery adapters for verification messages."""
+"""Transactional email adapters used by account verification."""
 
 import base64
 import html
@@ -30,15 +30,94 @@ class EmailDeliveryError(RuntimeError):
 
 def send_verification_code(recipient, code):
     config = current_app.config
-    if config.get("EMAIL_PROVIDER", "smtp") == "gmail_api":
+    provider = str(config.get("EMAIL_PROVIDER", "smtp")).strip().lower()
+    if provider == "brevo":
+        return _send_with_brevo(recipient, code, config)
+    if provider == "gmail_api":
         return _send_with_gmail_api(recipient, code, config)
-    if config.get("EMAIL_PROVIDER", "smtp") == "resend":
+    if provider == "resend":
         return _send_with_resend(recipient, code, config)
     return _send_with_smtp(recipient, code, config)
 
 
 def _message_text(code):
-    return f"Your one-time verification code is {code}. It expires in 10 minutes."
+    return (
+        "Hello,\n\n"
+        f"Your Enterprise Knowledge Base AI verification code is {code}.\n"
+        "It expires in 10 minutes.\n\n"
+        "If you did not request this code, you can ignore this email."
+    )
+
+
+def _verification_html(code):
+    safe_code = html.escape(str(code), quote=True)
+    return ("<!doctype html><html><head><meta name=\"viewport\" "
+            "content=\"width=device-width, initial-scale=1\"></head>"
+            "<body style=\"margin:0;background:#f3f6fb;font-family:Arial,sans-serif;color:#17233b\">"
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" style=\"padding:32px 16px\">"
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#fff;border-radius:12px\"><tr><td style=\"padding:32px\">"
+            "<div style=\"font-size:13px;font-weight:bold;letter-spacing:1px;color:#1769aa\">ENTERPRISE KNOWLEDGE BASE AI</div>"
+            "<h1 style=\"font-size:24px;margin:24px 0 12px\">Verify your email</h1>"
+            "<p style=\"line-height:1.6\">Hello,</p><p style=\"line-height:1.6\">Use this one-time code to finish setting up your account:</p>"
+            f"<div style=\"margin:24px 0;padding:16px;text-align:center;background:#f3f6fb;border-radius:8px;font-size:30px;font-weight:bold;letter-spacing:8px\">{safe_code}</div>"
+            "<p style=\"line-height:1.6\">This code expires in <strong>10 minutes</strong>.</p>"
+            "<p style=\"line-height:1.6;color:#536176\">If you did not request this code, ignore this message. For your security, never share your code.</p>"
+            "</td></tr></table></td></tr></table></body></html>")
+
+
+def _send_with_brevo(recipient, code, config):
+    api_key = config.get("BREVO_API_KEY")
+    sender_email = config.get("BREVO_SENDER_EMAIL")
+    sender_name = config.get("BREVO_SENDER_NAME", "Enterprise Knowledge Base AI")
+    missing = tuple(key for key, value in (
+        ("BREVO_API_KEY", api_key), ("BREVO_SENDER_EMAIL", sender_email),
+    ) if not isinstance(value, str) or not value.strip())
+    if missing:
+        raise EmailDeliveryError("missing_configuration", missing_settings=missing)
+
+    payload = json.dumps({
+        "sender": {"email": sender_email, "name": sender_name},
+        "to": [{"email": recipient}],
+        "subject": "Verify your Enterprise Knowledge Base account",
+        "textContent": _message_text(code),
+        "htmlContent": _verification_html(code),
+    }).encode("utf-8")
+    request = Request(
+        "https://api.brevo.com/v3/smtp/email", data=payload,
+        headers={
+            "api-key": api_key, "Content-Type": "application/json",
+            "Accept": "application/json",
+        }, method="POST",
+    )
+    try:
+        with urlopen(request, timeout=config.get("BREVO_TIMEOUT_SECONDS", 10)) as response:
+            status = getattr(response, "status", 200)
+            if not 200 <= status < 300:
+                raise EmailDeliveryError("brevo_rejection")
+            response.read(64 * 1024)
+            return {"status": "sent", "provider": "brevo"}
+    except HTTPError as exc:
+        status = exc.code
+        categories = {
+            400: "brevo_bad_request", 401: "brevo_authentication",
+            403: "brevo_forbidden", 429: "brevo_rate_limited",
+        }
+        if status in categories:
+            category = categories[status]
+        elif status >= 500:
+            category = "brevo_unavailable"
+        else:
+            category = "brevo_rejection"
+        raise EmailDeliveryError(category) from None
+    except URLError as exc:
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (TimeoutError, socket.timeout)) or "timeout" in type(reason).__name__.lower():
+            raise EmailDeliveryError("brevo_timeout") from None
+        raise EmailDeliveryError("brevo_connection") from None
+    except (TimeoutError, socket.timeout):
+        raise EmailDeliveryError("brevo_timeout") from None
+    except OSError:
+        raise EmailDeliveryError("brevo_connection") from None
 
 
 def _send_with_smtp(recipient, code, config):
@@ -60,6 +139,7 @@ def _send_with_smtp(recipient, code, config):
     message["From"] = sender
     message["To"] = recipient
     message.set_content(_message_text(code))
+    message.add_alternative(_verification_html(code), subtype="html")
     try:
         with smtplib.SMTP(
             host, config["SMTP_PORT"], timeout=config["SMTP_TIMEOUT_SECONDS"]
@@ -101,6 +181,7 @@ def _send_with_resend(recipient, code, config):
         "to": [recipient],
         "subject": "Verify your Enterprise Knowledge Base account",
         "text": _message_text(code),
+        "html": _verification_html(code),
     }).encode("utf-8")
     request = Request(
         "https://api.resend.com/emails",
@@ -184,12 +265,7 @@ def _send_with_gmail_api(recipient, code, config):
     message["To"] = recipient
     text_body = _message_text(code)
     message.set_content(text_body)
-    message.add_alternative(
-        "<p>Your one-time verification code is <strong>"
-        + html.escape(str(code))
-        + "</strong>. It expires in 10 minutes.</p>",
-        subtype="html",
-    )
+    message.add_alternative(_verification_html(code), subtype="html")
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
 
     try:
