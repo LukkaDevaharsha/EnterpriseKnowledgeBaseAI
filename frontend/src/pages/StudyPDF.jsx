@@ -117,7 +117,7 @@ function DocxRuns({ runs, fallback, query }) {
   return highlightRuns(runs, fallback, query)
 }
 
-function DocxBlocks({ blocks, query, zoom }) {
+function DocxBlocks({ blocks, query }) {
   const rendered = []
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index]
@@ -140,15 +140,13 @@ function DocxBlocks({ blocks, query, zoom }) {
     const key = `block-${index}`
     const content = <DocxRuns runs={block.runs} fallback={block.text} query={query} />
     if (block.type === 'table') {
-      rendered.push(<div className="docx-table-wrap docx-block" id={`study-unit-${index}`} key={key}><table className="docx-table" style={{ fontSize: `${14 * zoom / 100}px` }}><tbody>
+      rendered.push(<div className="docx-table-wrap docx-block" id={`study-unit-${index}`} key={key}><table className="docx-table"><tbody>
         {block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => rowIndex === 0
           ? <th key={cellIndex} scope="col">{highlightText(cell, query)}</th>
           : <td key={cellIndex}>{highlightText(cell, query)}</td>)}</tr>)}
       </tbody></table></div>)
-    } else if (block.type === 'title') rendered.push(<h1 className="docx-title docx-block" id={`study-unit-${index}`} key={key}
-      style={{ fontSize: `clamp(${28 * zoom / 100}px, ${4 * zoom / 100}vw, ${38 * zoom / 100}px)` }}>{content}</h1>)
-    else if (block.type === 'subtitle') rendered.push(<p className="docx-subtitle docx-block" id={`study-unit-${index}`} key={key}
-      style={{ fontSize: `${18 * zoom / 100}px` }}>{content}</p>)
+    } else if (block.type === 'title') rendered.push(<h1 className="docx-title docx-block" id={`study-unit-${index}`} key={key}>{content}</h1>)
+    else if (block.type === 'subtitle') rendered.push(<p className="docx-subtitle docx-block" id={`study-unit-${index}`} key={key}>{content}</p>)
     else if (block.type === 'heading') {
       const Heading = `h${Math.min(6, Math.max(2, block.level || 2))}`
       rendered.push(<Heading className="docx-heading docx-block" id={`study-unit-${index}`} key={key}>{content}</Heading>)
@@ -225,9 +223,10 @@ function PptxSlidePreview({ token, documentId, page, index, zoom, fitWidth, quer
   const readyImage = image?.key === imageKey ? image : null
   const renderError = error?.key === imageKey ? error : null
 
-  return <article id={`study-unit-${index}`} ref={elementRef} className={`pptx-slide-card${matches.length ? ' has-matches' : ''}`} aria-label={`Slide ${slideNumber}`}>
+  return <article id={`study-unit-${index}`} ref={elementRef} className={`pptx-slide-card${matches.length ? ' has-matches' : ''}`} aria-label={`Slide ${slideNumber}`}
+    style={{ zoom: zoomScale(fitWidth, zoom) }}>
     <div className="pptx-slide-viewport">
-      {readyImage && <img className="pptx-slide-image" src={readyImage.url} alt={`Slide ${slideNumber}`} style={{ width: previewWidth(fitWidth, zoom) }} />}
+      {readyImage && <img className="pptx-slide-image" src={readyImage.url} alt={`Slide ${slideNumber}`} />}
       {!readyImage && !renderError && <div className="pptx-slide-placeholder" aria-hidden="true"><PageLoading label={`Rendering slide ${slideNumber}…`} /></div>}
       {renderError && <div className="pptx-slide-error"><ErrorMessage>{renderError.message}</ErrorMessage>
         <button type="button" className="button button-secondary button-small" onClick={() => setRetry((count) => count + 1)}>Retry slide</button></div>}
@@ -268,8 +267,8 @@ function columnName(index) {
   return label
 }
 
-function previewWidth(fitWidth, zoom) {
-  return fitWidth || zoom <= 100 ? '100%' : `${zoom}%`
+function zoomScale(fitWidth, zoom) {
+  return fitWidth ? 1 : zoom / 100
 }
 
 function cloneSheets(spreadsheets) {
@@ -365,8 +364,7 @@ function SpreadsheetEditor({ document: doc, spreadsheets, pages, query, zoom, fi
     if (cell) requestAnimationFrame(() => document.getElementById(`spreadsheet-cell-${unitIndex}-${cell.rowIndex}-${cell.columnIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }))
   }
 
-  return <section id={`study-unit-${sheetIndex}`} className="spreadsheet-editor"
-    style={{ paddingRight: sheetMatches.length ? `${Math.max(22, zoom * 0.34)}px` : undefined }}>
+  return <section id={`study-unit-${sheetIndex}`} className="spreadsheet-editor">
     {sheets.length > 1 && <div className="spreadsheet-tabs" role="tablist" aria-label="Worksheets">
       {sheets.map((item, index) => <button key={`${index}-${item.name}`} type="button" role="tab"
         aria-selected={sheetIndex === index} className={sheetIndex === index ? 'active' : ''}
@@ -386,7 +384,7 @@ function SpreadsheetEditor({ document: doc, spreadsheets, pages, query, zoom, fi
     {saveError && <div className="alert alert-error">{saveError}</div>}
     {saveMessage && <div className="alert alert-success">{saveMessage}</div>}
     <div className="spreadsheet-table-scroll">
-      <table className="spreadsheet-table" style={{ width: previewWidth(fitWidth, zoom), minWidth: previewWidth(fitWidth, zoom), fontSize: `${14 * zoom / 100}px` }}>
+      <table className="spreadsheet-table" style={{ zoom: zoomScale(fitWidth, zoom) }}>
         <thead><tr><th className="spreadsheet-row-number" aria-label="Row number">#</th>
           {Array.from({ length: columnCount }, (_, index) => <th key={index}>{columnName(index)}</th>)}
         </tr></thead>
@@ -429,15 +427,15 @@ function DocumentPreview({ document: doc, pages, structure = [], spreadsheet = [
   }
   if (doc.file_type === 'DOCX' && structure.length) {
     return <div className="pdf-pages-scroll document-preview docx-preview" aria-label="Structured Word document preview">
-      <article className="docx-document" style={{ width: previewWidth(fitWidth, zoom), maxWidth: 'none', marginInline: 'auto', fontSize: `${16 * zoom / 100}px`, padding: zoom < 100 ? `clamp(${28 * zoom / 100}px, ${6 * zoom / 100}vw, ${76 * zoom / 100}px)` : undefined, paddingRight: docxMarkers.length ? `${Math.max(30, zoom * 0.68)}px` : undefined }}>
-        <DocxBlocks blocks={structure} query={query} zoom={zoom} />
+      <article className="docx-document" style={{ zoom: zoomScale(fitWidth, zoom), paddingRight: docxMarkers.length ? '32px' : undefined }}>
+        <DocxBlocks blocks={structure} query={query} />
         <MatchMarkerRail matches={docxMarkers} textLength={docxTotalTextLength} activeMatchIndex={activeMatchIndex}
           onSelectMatch={onSelectMatch} className="docx-search-marker-rail" />
       </article>
     </div>
   }
   return <div className="pdf-pages-scroll document-preview" aria-label={`${doc.file_type} document preview`}>
-    {pages.map((page, index) => <PreviewUnit index={index} onVisible={onVisible} className="panel document-preview-page" key={`${doc.id}:${index}`} style={{ width: previewWidth(fitWidth, zoom), maxWidth: 'none', marginInline: 'auto', fontSize: `${14 * zoom / 100}px`, paddingRight: matches.some((match) => match.pageIndex === index) ? `${Math.max(18, zoom * 0.32)}px` : undefined }}
+    {pages.map((page, index) => <PreviewUnit index={index} onVisible={onVisible} className="panel document-preview-page" key={`${doc.id}:${index}`} style={{ width: '100%', zoom: zoomScale(fitWidth, zoom), paddingRight: matches.some((match) => match.pageIndex === index) ? '18px' : undefined }}
       matches={matches.filter((match) => match.pageIndex === index)} textLength={page.text.length}
       activeMatchIndex={activeMatchIndex} onSelectMatch={onSelectMatch}>
       {page.page_number && <h3>Slide {page.page_number}</h3>}
@@ -502,8 +500,9 @@ function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, o
   const reference = useCallback((node) => { elementRef.current = node }, [])
 
   return <article id={`study-pdf-page-${index}`} ref={reference}
-    className={`rendered-pdf-page${isCurrent ? ' current' : ''}`} aria-label={`PDF page ${pageNumber}`}>
-    <div className="rendered-pdf-page-content" style={{ width: fitWidth ? 'calc(100% - 10px)' : `calc(${zoom}% - 10px)` }}>
+    className={`rendered-pdf-page${isCurrent ? ' current' : ''}`} aria-label={`PDF page ${pageNumber}`}
+    style={{ zoom: zoomScale(fitWidth, zoom) }}>
+    <div className="rendered-pdf-page-content" style={{ width: 'min(100%, 1100px)' }}>
       <div className="rendered-pdf-page-surface">
         {ready && <img src={image.url} alt={`Page ${pageNumber}`} className="study-pdf-page"
           style={{ width: '100%' }} />}
@@ -550,6 +549,7 @@ export default function StudyPDF() {
   const [collapsed, setCollapsed] = useState(() => new Set())
   const [libraryOpen, setLibraryOpen] = useState(() => !window.matchMedia('(max-width: 1200px)').matches)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [activeStudySection, setActiveStudySection] = useState('viewer')
   const [excerptOpen, setExcerptOpen] = useState(false)
   const [zoom, setZoom] = useState(100)
   const [fitWidth, setFitWidth] = useState(true)
@@ -679,7 +679,12 @@ export default function StudyPDF() {
 
   useEffect(() => {
     if (!assistantOpen) return undefined
-    function closeOnEscape(event) { if (event.key === 'Escape') setAssistantOpen(false) }
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') {
+        setAssistantOpen(false)
+        setActiveStudySection('viewer')
+      }
+    }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [assistantOpen])
@@ -700,6 +705,7 @@ export default function StudyPDF() {
     setMatchIndex(0)
     setCollapsed(new Set())
     if (window.matchMedia('(max-width: 1200px)').matches) setLibraryOpen(false)
+    setActiveStudySection('viewer')
     setSearchParams({ document_id: id })
   }
 
@@ -765,8 +771,19 @@ export default function StudyPDF() {
       </div>
       <span className="study-document-count">{documents.length} {documents.length === 1 ? 'document' : 'documents'}</span>
     </header>
+    <nav className="study-section-nav" aria-label="Study sections">
+      <button type="button" aria-pressed={activeStudySection === 'documents'}
+        className={activeStudySection === 'documents' ? 'active' : ''}
+        onClick={() => { setActiveStudySection('documents'); setLibraryOpen(true); setAssistantOpen(false) }}>Documents</button>
+      <button type="button" aria-pressed={activeStudySection === 'viewer'}
+        className={activeStudySection === 'viewer' ? 'active' : ''}
+        onClick={() => { setActiveStudySection('viewer'); setLibraryOpen(false); setAssistantOpen(false) }}>PDF Viewer</button>
+      <button type="button" aria-pressed={activeStudySection === 'assistant'}
+        className={activeStudySection === 'assistant' ? 'active' : ''}
+        onClick={() => { setActiveStudySection('assistant'); setLibraryOpen(false); setAssistantOpen(true) }}>Study Assistant</button>
+    </nav>
     <ErrorMessage>{error}</ErrorMessage>
-    <div className={`study-workspace${libraryOpen ? ' library-open' : ''}`}>
+    <div className={`study-workspace study-section-${activeStudySection}${libraryOpen ? ' library-open' : ''}${assistantOpen ? ' assistant-open' : ''}`}>
       {libraryOpen && <aside className="study-library panel" aria-label="Document library and table of contents">
         <div className="study-panel-heading"><div><span className="eyebrow">DOCUMENT LIBRARY</span><h2>Study materials</h2></div><span className="heading-count">{documents.length}</span></div>
         <nav className="study-document-list" aria-label="Available documents">
@@ -775,7 +792,7 @@ export default function StudyPDF() {
             const filename = getDistinctFilename(doc)
             return <button key={doc.id} type="button" aria-current={documentId === String(doc.id) ? 'page' : undefined}
               className={`study-document-option${documentId === String(doc.id) ? ' selected' : ''}`}
-              onClick={() => selectDocument(String(doc.id))}>
+              onClick={() => { selectDocument(String(doc.id)); setActiveStudySection('viewer') }}>
               <span className={`file-badge ${doc.file_type.toLowerCase()}`}>{doc.file_type}</span><span><strong title={title}>{title}</strong>{filename && <small title={filename}>{filename}</small>}</span>
             </button>
           })}
@@ -796,12 +813,12 @@ export default function StudyPDF() {
       <section className="study-reader panel" aria-label="Document reader">
         <div className="reader-toolbar">
           <button type="button" className="reader-icon-button" aria-label={libraryOpen ? 'Hide PDF navigation' : 'Show PDF navigation'}
-            aria-expanded={libraryOpen} onClick={() => setLibraryOpen((open) => !open)}><LibraryIcon /></button>
+            aria-expanded={libraryOpen} onClick={() => { setLibraryOpen((open) => !open); setActiveStudySection(libraryOpen ? 'viewer' : 'documents') }}><LibraryIcon /></button>
           <div className="reader-document-title"><span className={`file-badge ${selectedDocument?.file_type?.toLowerCase() || 'pdf'}`}>{selectedDocument?.file_type || 'PDF'}</span><div><strong title={getDocumentTitle(selectedDocument)}>{getDocumentTitle(selectedDocument)}</strong>{getDistinctFilename(selectedDocument) && <small>{getDistinctFilename(selectedDocument)}</small>}</div></div>
           <div className="reader-toolbar-actions">
             {pdfUrl && <a className="button button-secondary button-small" href={pdfUrl} download={selectedDocument?.original_filename || 'document.pdf'}>Download</a>}
             <button type="button" className="reader-icon-button assistant-launcher" aria-label="Open BaseAI study assistant"
-              aria-expanded={assistantOpen} onClick={() => setAssistantOpen(true)}><AssistantIcon /><span>Ask BaseAI</span></button>
+              aria-expanded={assistantOpen} onClick={() => { setAssistantOpen(true); setActiveStudySection('assistant') }}><AssistantIcon /><span>Ask BaseAI</span></button>
           </div>
         </div>
         {selectedDocument && <div className="reader-search-tools">
@@ -882,16 +899,11 @@ export default function StudyPDF() {
               {query && matches.length === 0 && <p className="reader-no-match">No exact text matches in this PDF. A retrieved passage may still be shown above.</p>}
             </>}
       </section>
-    </div>
-
-    <div className={`study-assistant-layer${assistantOpen ? ' open' : ''}`} aria-hidden={!assistantOpen}>
-      <button type="button" className="study-assistant-backdrop" aria-label="Close BaseAI assistant" tabIndex={assistantOpen ? 0 : -1}
-        onClick={() => setAssistantOpen(false)} />
-      <aside className="study-assistant panel" role="dialog" aria-modal="false" aria-label="BaseAI study assistant">
+      {assistantOpen && <aside className="study-assistant panel" role="dialog" aria-modal="false" aria-label="BaseAI study assistant">
         <div className="study-assistant-heading"><div><span className="eyebrow">STUDY ASSISTANT</span><strong>{selectedDocument?.title}</strong></div>
-          <button type="button" className="reader-icon-button" aria-label="Close BaseAI assistant" onClick={() => setAssistantOpen(false)}>×</button></div>
+          <button type="button" className="reader-icon-button" aria-label="Close BaseAI assistant" onClick={() => { setAssistantOpen(false); setActiveStudySection('viewer') }}>×</button></div>
         <BaseAI key={documentId} compact documentId={documentId} documentTitle={selectedDocument?.title} />
-      </aside>
+      </aside>}
     </div>
   </div>
 }

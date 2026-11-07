@@ -28,6 +28,19 @@ function ApplicationLayout({ theme, setTheme }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const navigate = useNavigate()
   function signOut() { logout(); navigate('/login', { replace: true }) }
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') setMobileNavOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [mobileNavOpen])
   function toggleSidebar() {
     if (window.matchMedia('(max-width: 1100px)').matches) {
       setMobileNavOpen((open) => !open)
