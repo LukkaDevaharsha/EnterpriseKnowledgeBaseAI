@@ -6,6 +6,7 @@ from app.utils.database_url import render_database_url
 
 
 def _database_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("JWT_SECRET_KEY", "database-config-test-key")
     monkeypatch.setenv("DOCUMENT_STORAGE_PATH", str(tmp_path / "database-files"))
@@ -15,6 +16,23 @@ def _database_config(monkeypatch, tmp_path):
     monkeypatch.setenv("DB_PORT", "6543")
     monkeypatch.setenv("DB_NAME", "knowledge")
     return make_url(create_app({"TESTING": True}).config["SQLALCHEMY_DATABASE_URI"])
+
+
+def test_render_database_url_is_used_and_normalized(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("JWT_SECRET_KEY", "database-config-test-key")
+    monkeypatch.setenv("DOCUMENT_STORAGE_PATH", str(tmp_path / "database-files"))
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgres://render_user:render-password@db.example:5432/knowledge"
+    )
+
+    url = make_url(create_app({"TESTING": True}).config["SQLALCHEMY_DATABASE_URI"])
+
+    assert url.drivername == "postgresql+psycopg"
+    assert url.username == "render_user"
+    assert url.password == "render-password"
+    assert url.host == "db.example"
+    assert url.database == "knowledge"
 
 
 def test_database_url_supports_required_sslmode(monkeypatch, tmp_path):

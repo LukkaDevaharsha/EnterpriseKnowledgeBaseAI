@@ -136,22 +136,32 @@ def create_app(config_overrides=None):
         minutes=token_expiration_minutes
     )
 
-    db_user = os.getenv("DB_USER", "postgres")
-    db_password = os.getenv("DB_PASSWORD", "")
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = int(os.getenv("DB_PORT", "5432"))
-    db_name = os.getenv("DB_NAME", "enterprise_knowledge_base")
-    db_sslmode = os.getenv("DB_SSLMODE", "").strip()
-    database_url_options = {"query": {"sslmode": db_sslmode}} if db_sslmode else {}
-    app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
-        drivername="postgresql+psycopg",
-        username=db_user,
-        password=db_password,
-        host=db_host,
-        port=db_port,
-        database=db_name,
-        **database_url_options,
-    )
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        # Render supplies postgres:// or postgresql:// URLs. Normalize the
+        # driver so SQLAlchemy uses the psycopg 3 dependency in this project.
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+        elif database_url.startswith("postgresql://"):
+            database_url = "postgresql+psycopg://" + database_url[len("postgresql://"):]
+        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    else:
+        db_user = os.getenv("DB_USER", "postgres")
+        db_password = os.getenv("DB_PASSWORD", "")
+        db_host = os.getenv("DB_HOST", "localhost")
+        db_port = int(os.getenv("DB_PORT", "5432"))
+        db_name = os.getenv("DB_NAME", "enterprise_knowledge_base")
+        db_sslmode = os.getenv("DB_SSLMODE", "").strip()
+        database_url_options = {"query": {"sslmode": db_sslmode}} if db_sslmode else {}
+        app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
+            drivername="postgresql+psycopg",
+            username=db_user,
+            password=db_password,
+            host=db_host,
+            port=db_port,
+            database=db_name,
+            **database_url_options,
+        )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     # Keep uploaded files outside the backend and frontend public directories.
