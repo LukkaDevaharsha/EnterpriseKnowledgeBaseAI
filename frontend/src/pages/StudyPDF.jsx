@@ -520,6 +520,39 @@ function StudyPDFPage({ token, documentId, page, index, query, fitWidth, zoom, o
   </article>
 }
 
+const STUDY_PANEL_WIDTHS_KEY = 'study-documents-panel-widths'
+const STUDY_PANEL_LIMITS = {
+  library: { min: 190, max: 380, initial: 250 },
+  assistant: { min: 280, max: 460, initial: 340 },
+}
+
+function clampStudyWidth(panel, value, availableWidth = Infinity) {
+  const { min, max } = STUDY_PANEL_LIMITS[panel]
+  return Math.max(min, Math.min(max, availableWidth, Math.round(value)))
+}
+
+function readStudyPanelWidths() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(STUDY_PANEL_WIDTHS_KEY) || '{}')
+    return {
+      library: clampStudyWidth('library', Number(saved.library) || STUDY_PANEL_LIMITS.library.initial),
+      assistant: clampStudyWidth('assistant', Number(saved.assistant) || STUDY_PANEL_LIMITS.assistant.initial),
+    }
+  } catch {
+    return { library: STUDY_PANEL_LIMITS.library.initial, assistant: STUDY_PANEL_LIMITS.assistant.initial }
+  }
+}
+
+function StudyResizeDivider({ panel, value, maxValue, onResizeStart, onResizeMove, onResizeEnd, onKeyDown }) {
+  const limits = STUDY_PANEL_LIMITS[panel]
+  return <div className="study-resize-divider" role="separator" aria-orientation="vertical" aria-label={`Resize ${panel} panel`}
+    aria-valuemin={limits.min} aria-valuemax={maxValue ?? limits.max} aria-valuenow={value} tabIndex={0}
+    onPointerDown={onResizeStart} onPointerMove={onResizeMove} onPointerUp={onResizeEnd}
+    onPointerCancel={onResizeEnd} onLostPointerCapture={onResizeEnd} onKeyDown={onKeyDown}>
+    <span aria-hidden="true">‹›</span>
+  </div>
+}
+
 export default function StudyPDF() {
   const { token, user } = useAuth()
   const location = useLocation()
@@ -545,12 +578,89 @@ export default function StudyPDF() {
   const [collapsed, setCollapsed] = useState(() => new Set())
   const [libraryOpen, setLibraryOpen] = useState(() => !window.matchMedia('(max-width: 1200px)').matches)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [panelWidths, setPanelWidths] = useState(readStudyPanelWidths)
+  const [workspaceWidth, setWorkspaceWidth] = useState(0)
+  const workspaceRef = useRef(null)
+  const panelWidthsRef = useRef(panelWidths)
+  const resizeDragRef = useRef(null)
   const [activeStudySection, setActiveStudySection] = useState('viewer')
   const [excerptOpen, setExcerptOpen] = useState(false)
   const [zoom, setZoom] = useState(100)
   const [fitWidth, setFitWidth] = useState(true)
   const initialScrollKey = useRef('')
   const onPageVisible = useCallback((index) => setPageIndex(index), [])
+
+  useEffect(() => {
+    const workspace = workspaceRef.current
+    if (!workspace) return undefined
+    const updateWidth = () => setWorkspaceWidth(workspace.getBoundingClientRect().width)
+    updateWidth()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth)
+      return () => window.removeEventListener('resize', updateWidth)
+    }
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(workspace)
+    return () => observer.disconnect()
+  }, [listLoading, documents.length])
+
+  useEffect(() => {
+    panelWidthsRef.current = panelWidths
+  }, [panelWidths])
+
+  useEffect(() => () => {
+    document.documentElement.classList.remove('study-panels-resizing')
+  }, [])
+
+  function updatePanelWidth(panel, value, persist = false) {
+    const limits = STUDY_PANEL_LIMITS[panel]
+    const pairedColumn = libraryOpen && assistantOpen && threeColumnLayout
+    const otherWidth = panel === 'library' ? panelWidthsRef.current.assistant : panelWidthsRef.current.library
+    const currentAvailable = Math.max(limits.min, workspaceWidth - 360 - (pairedColumn ? otherWidth + 48 : 0))
+    const nextWidth = clampStudyWidth(panel, value, Math.min(limits.max, currentAvailable))
+    const nextWidths = { ...panelWidthsRef.current, [panel]: nextWidth }
+    panelWidthsRef.current = nextWidths
+    setPanelWidths(nextWidths)
+    if (persist) {
+      try { window.localStorage.setItem(STUDY_PANEL_WIDTHS_KEY, JSON.stringify(nextWidths)) } catch { /* Storage may be disabled. */ }
+    }
+  }
+
+  function startPanelResize(panel, event) {
+    if (event.button !== undefined && event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    resizeDragRef.current = { panel, pointerId: event.pointerId, startX: event.clientX, startWidth: panelWidthsRef.current[panel] }
+    document.documentElement.classList.add('study-panels-resizing')
+  }
+
+  function movePanelResize(event) {
+    const drag = resizeDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const direction = drag.panel === 'assistant' ? -1 : 1
+    updatePanelWidth(drag.panel, drag.startWidth + (event.clientX - drag.startX) * direction)
+  }
+
+  function endPanelResize(event) {
+    const drag = resizeDragRef.current
+    if (!drag || (event.pointerId !== undefined && drag.pointerId !== event.pointerId)) return
+    resizeDragRef.current = null
+    document.documentElement.classList.remove('study-panels-resizing')
+    try { window.localStorage.setItem(STUDY_PANEL_WIDTHS_KEY, JSON.stringify(panelWidthsRef.current)) } catch { /* Storage may be disabled. */ }
+  }
+
+  function handleResizeKey(panel, event) {
+    const limits = STUDY_PANEL_LIMITS[panel]
+    const direction = panel === 'assistant' ? -1 : 1
+    let nextWidth
+    if (event.key === 'ArrowLeft') nextWidth = panelWidthsRef.current[panel] - 16 * direction
+    else if (event.key === 'ArrowRight') nextWidth = panelWidthsRef.current[panel] + 16 * direction
+    else if (event.key === 'Home') nextWidth = limits.min
+    else if (event.key === 'End') nextWidth = limits.max
+    else return
+    event.preventDefault()
+    updatePanelWidth(panel, nextWidth, true)
+  }
 
   useEffect(() => {
     let active = true
@@ -671,6 +781,25 @@ export default function StudyPDF() {
       : ''
   const sourcePageIsCurrent = Number.isInteger(requestedPageNumber) && pageNumber === requestedPageNumber
   const visibleExcerpt = sourcePageIsCurrent ? sourceExcerpt || matchingExcerpt : matchingExcerpt
+  const canResizePanels = workspaceWidth >= 642
+  const threeColumnLayout = canResizePanels && libraryOpen && assistantOpen
+    && workspaceWidth >= panelWidths.library + panelWidths.assistant + 408
+  const visibleLibraryWidth = canResizePanels && libraryOpen
+    ? clampStudyWidth('library', panelWidths.library, Math.max(190, workspaceWidth - 360 - (threeColumnLayout ? panelWidths.assistant + 48 : 0)))
+    : panelWidths.library
+  const visibleAssistantWidth = canResizePanels && assistantOpen
+    ? clampStudyWidth('assistant', panelWidths.assistant, Math.max(280, workspaceWidth - 360 - (threeColumnLayout ? panelWidths.library + 48 : 0)))
+    : panelWidths.assistant
+  const libraryMaxWidth = canResizePanels
+    ? clampStudyWidth('library', STUDY_PANEL_LIMITS.library.max, Math.max(190, workspaceWidth - 360 - (threeColumnLayout ? panelWidths.assistant + 48 : 0)))
+    : STUDY_PANEL_LIMITS.library.max
+  const assistantMaxWidth = canResizePanels
+    ? clampStudyWidth('assistant', STUDY_PANEL_LIMITS.assistant.max, Math.max(280, workspaceWidth - 360 - (threeColumnLayout ? panelWidths.library + 48 : 0)))
+    : STUDY_PANEL_LIMITS.assistant.max
+  const workspaceGridStyle = canResizePanels ? {
+    '--study-library-width': `${visibleLibraryWidth}px`,
+    '--study-assistant-width': `${visibleAssistantWidth}px`,
+  } : undefined
 
 
   useEffect(() => {
@@ -779,7 +908,8 @@ export default function StudyPDF() {
         onClick={() => { setActiveStudySection('assistant'); setLibraryOpen(false); setAssistantOpen(true) }}>Study Assistant</button>
     </nav>
     <ErrorMessage>{error}</ErrorMessage>
-    <div className={`study-workspace study-section-${activeStudySection}${libraryOpen ? ' library-open' : ''}${assistantOpen ? ' assistant-open' : ''}`}>
+    <div ref={workspaceRef} style={workspaceGridStyle}
+      className={`study-workspace study-section-${activeStudySection}${libraryOpen ? ' library-open' : ''}${assistantOpen ? ' assistant-open' : ''}${canResizePanels ? ' study-panels-resizable' : ''}${threeColumnLayout ? ' study-panels-three-column' : ''}`}>
       {libraryOpen && <aside className="study-library panel" aria-label="Document library and table of contents">
         <div className="study-panel-heading"><div><span className="eyebrow">DOCUMENT LIBRARY</span><h2>Study materials</h2></div><span className="heading-count">{documents.length}</span></div>
         <nav className="study-document-list" aria-label="Available documents">
@@ -805,6 +935,9 @@ export default function StudyPDF() {
               : null}
       </aside>}
       {libraryOpen && <button type="button" className="study-library-backdrop" aria-label="Close PDF navigation" onClick={() => setLibraryOpen(false)} />}
+      {canResizePanels && libraryOpen && <StudyResizeDivider panel="library" value={visibleLibraryWidth} maxValue={libraryMaxWidth}
+        onResizeStart={(event) => startPanelResize('library', event)} onResizeMove={movePanelResize}
+        onResizeEnd={endPanelResize} onKeyDown={(event) => handleResizeKey('library', event)} />}
 
       <section className="study-reader panel" aria-label="Document reader">
         <div className="reader-toolbar">
@@ -897,6 +1030,9 @@ export default function StudyPDF() {
               {query && matches.length === 0 && <p className="reader-no-match">No exact text matches in this PDF. A retrieved passage may still be shown above.</p>}
             </>}
       </section>
+      {canResizePanels && assistantOpen && (!libraryOpen || threeColumnLayout) && <StudyResizeDivider panel="assistant" value={visibleAssistantWidth} maxValue={assistantMaxWidth}
+        onResizeStart={(event) => startPanelResize('assistant', event)} onResizeMove={movePanelResize}
+        onResizeEnd={endPanelResize} onKeyDown={(event) => handleResizeKey('assistant', event)} />}
       {assistantOpen && <aside className="study-assistant panel" role="dialog" aria-modal="false" aria-label="BaseAI study assistant">
         <div className="study-assistant-heading"><div><span className="eyebrow">STUDY ASSISTANT</span><strong>{selectedDocument?.title}</strong></div>
           <button type="button" className="reader-icon-button" aria-label="Close BaseAI assistant" onClick={() => { setAssistantOpen(false); setActiveStudySection('viewer') }}>×</button></div>

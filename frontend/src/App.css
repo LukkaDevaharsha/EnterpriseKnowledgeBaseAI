@@ -2174,6 +2174,76 @@ input::placeholder, textarea::placeholder { color: var(--text-muted) !important;
 :root[data-theme='light'] .baseai-panel.baseai-full-page,
 :root[data-theme='dark'] .baseai-panel.baseai-full-page { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 
+/* Study Documents panel splitters. */
+.study-workspace.study-panels-resizable.library-open:not(.assistant-open) {
+  grid-template-columns: var(--study-library-width) 10px minmax(320px, 1fr);
+}
+.study-workspace.study-panels-resizable.assistant-open:not(.library-open) {
+  grid-template-columns: minmax(320px, 1fr) 10px var(--study-assistant-width);
+}
+.study-workspace.study-panels-resizable.library-open.assistant-open {
+  grid-template-columns: var(--study-library-width) 10px minmax(320px, 1fr);
+}
+.study-workspace.study-panels-resizable.library-open.assistant-open.study-panels-three-column {
+  grid-template-columns: var(--study-library-width) 10px minmax(320px, 1fr) 10px var(--study-assistant-width);
+}
+.study-workspace.study-panels-resizable.library-open.assistant-open:not(.study-panels-three-column) .study-assistant {
+  grid-column: 1 / -1;
+}
+.study-resize-divider {
+  position: relative;
+  z-index: 2;
+  width: 10px;
+  min-width: 10px;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.study-resize-divider::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+  background: var(--border-primary);
+  content: '';
+  transform: translateX(-50%);
+}
+.study-resize-divider span {
+  position: relative;
+  padding: 2px 1px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: var(--surface-elevated);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0;
+}
+.study-resize-divider:hover::before,
+.study-resize-divider:focus-visible::before { width: 2px; background: var(--brand); }
+.study-resize-divider:hover span,
+.study-resize-divider:focus-visible span { opacity: 1; }
+.study-resize-divider:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+html.study-panels-resizing,
+html.study-panels-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+@media (max-width: 850px) {
+  .study-workspace.study-panels-resizable.library-open:not(.assistant-open),
+  .study-workspace.study-panels-resizable.assistant-open:not(.library-open),
+  .study-workspace.study-panels-resizable.library-open.assistant-open,
+  .study-workspace.study-panels-resizable.library-open.assistant-open.study-panels-three-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .study-workspace.study-panels-resizable.library-open.assistant-open:not(.study-panels-three-column) .study-assistant {
+    grid-column: 1;
+  }
+  .study-resize-divider { display: none; }
+}
+
 /* Apply the requested blue palette over older component-level dark overrides. */
 :root[data-theme='dark'] {
   color-scheme: dark;
