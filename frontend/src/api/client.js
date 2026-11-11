@@ -98,6 +98,17 @@ export const ragApi = {
   ),
 }
 
+export const conversationsApi = {
+  list: (token) => apiRequest('/api/conversations', { token }),
+  create: (token) => apiRequest('/api/conversations', { token, method: 'POST', body: {} }),
+  get: (token, id) => apiRequest(`/api/conversations/${id}`, { token }),
+  addMessage: (token, id, message) => apiRequest(`/api/conversations/${id}/messages`, { token, method: 'POST', body: message }),
+  update: (token, id, changes) => apiRequest(`/api/conversations/${id}`, { token, method: 'PATCH', body: changes }),
+  unlock: (token, id, password) => apiRequest(`/api/conversations/${id}/unlock`, { token, method: 'POST', body: { password } }),
+  remove: (token, id) => apiRequest(`/api/conversations/${id}`, { token, method: 'DELETE' }),
+  shared: (shareToken) => apiRequest(`/api/conversations/shared/${encodeURIComponent(shareToken)}`),
+}
+
 async function authorizedBlob(token, path) {
   let response
   try {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ragApi } from '../api/client'
+import { conversationsApi, ragApi } from '../api/client'
 import { EmptyState, ErrorMessage } from './Feedback'
 import { useAuth } from '../context/useAuth'
 
@@ -67,15 +67,51 @@ function FormattedAnswer({ text }) {
   return <div className="answer-content">{sections}</div>
 }
 
-export default function BaseAI({ documentId, documentTitle, compact = false, suggestions = [] }) {
+export default function BaseAI({ documentId, documentTitle, compact = false, fullPage = false, suggestions = [] }) {
   const { token } = useAuth()
   const [question, setQuestion] = useState('')
   const [response, setResponse] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [conversationId, setConversationId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const controllerRef = useRef(null)
 
   useEffect(() => () => controllerRef.current?.abort(), [documentId])
+
+  useEffect(() => {
+    if (!fullPage || documentId) return undefined
+    async function openConversation(event) {
+      controllerRef.current?.abort()
+      setLoading(false); setError(''); setResponse(null); setQuestion('')
+      if (event.detail?.create || !event.detail?.conversationId) {
+        setConversationId(null); setMessages([]); return
+      }
+      try {
+        const result = await conversationsApi.get(token, event.detail.conversationId)
+        setConversationId(result.id); setMessages(result.messages || [])
+        window.dispatchEvent(new CustomEvent('conversation:selected', { detail: { conversationId: result.id } }))
+      } catch (err) { setConversationId(null); setMessages([]); setError(err.message) }
+    }
+    function handleLock(event) {
+      if (event.detail?.conversationId === conversationId) {
+        setConversationId(null); setMessages([]); setError('This chat is locked. Unlock it in Chat history to continue.')
+      }
+    }
+    function handleUnavailable(event) {
+      if (event.detail?.conversationId === conversationId) {
+        setConversationId(null); setMessages([]); setError(event.detail.reason || 'This chat is no longer available.')
+      }
+    }
+    window.addEventListener('conversation:open', openConversation)
+    window.addEventListener('conversation:locked', handleLock)
+    window.addEventListener('conversation:unavailable', handleUnavailable)
+    return () => {
+      window.removeEventListener('conversation:open', openConversation)
+      window.removeEventListener('conversation:locked', handleLock)
+      window.removeEventListener('conversation:unavailable', handleUnavailable)
+    }
+  }, [conversationId, documentId, fullPage, token])
 
   async function submit(event) {
     event.preventDefault()
@@ -87,14 +123,43 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
     setLoading(true)
     setError('')
     setResponse(null)
+    const prompt = question.trim()
     try {
-      const result = await ragApi.ask(token, question.trim(), 5, {
+      let activeConversationId = conversationId
+      if (fullPage && !documentId) {
+        if (!activeConversationId) {
+          const created = await conversationsApi.create(token)
+          activeConversationId = created.id
+          setConversationId(created.id)
+          window.dispatchEvent(new CustomEvent('conversation:selected', { detail: { conversationId: created.id } }))
+        }
+        await conversationsApi.addMessage(token, activeConversationId, { role: 'user', content: prompt })
+        setMessages((current) => [...current, { role: 'user', content: prompt, citations: [], metadata: {} }])
+        window.dispatchEvent(new Event('conversation:changed'))
+      }
+      const result = await ragApi.ask(token, prompt, 5, {
         documentId: documentId || undefined,
         signal: controller.signal,
       })
-      if (!controller.signal.aborted) setResponse(result)
+      if (!controller.signal.aborted) {
+        if (fullPage) {
+          if (!documentId) {
+            await conversationsApi.addMessage(token, activeConversationId, {
+              role: 'assistant', content: result.answer || '', citations: result.citations || [],
+              metadata: { answer_type: result.answer_type, insufficient_evidence: result.insufficient_evidence },
+            })
+            window.dispatchEvent(new Event('conversation:changed'))
+          }
+          setMessages((current) => [...current,
+            { role: 'assistant', content: result.answer || '', citations: result.citations || [], metadata: { answer_type: result.answer_type, insufficient_evidence: result.insufficient_evidence } },
+          ])
+          setQuestion('')
+        } else setResponse(result)
+      }
     } catch (err) {
-      if (!controller.signal.aborted) setError(err.message)
+      if (!controller.signal.aborted) {
+        setError(err.message)
+      }
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }
@@ -118,9 +183,9 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
     ? response.answer.replace(/^General information\s*\(not company policy\):\s*/i, '')
     : response?.answer
 
-  return <section className={`baseai-panel${compact ? ' baseai-compact' : ''}`} aria-label="BaseAI question assistant">
+  return <section className={`baseai-panel${compact ? ' baseai-compact' : ''}${fullPage ? ' baseai-full-page' : ''}`} aria-label="BaseAI question assistant">
     <div className="baseai-heading">
-      <span className="baseai-mark" aria-hidden="true">B</span>
+      {!compact && <span className="baseai-mark" aria-hidden="true"><img className="baseai-icon" src="/Screenshot%202026-11-09%20010326.png" alt="" /></span>}
       <div><span className="eyebrow">{documentId ? 'DOCUMENT STUDY' : 'KNOWLEDGE ASSISTANT'}</span>
         <h2>{documentId ? 'Ask about this PDF' : 'Ask BaseAI'}</h2>
       </div>
@@ -128,6 +193,16 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
     {documentId
       ? <p className="baseai-scope">Questions are searched only in <strong>{documentTitle || 'the selected PDF'}</strong>.</p>
       : <p className="baseai-scope">Answers use documents you are authorized to access. General responses are labeled clearly.</p>}
+    {fullPage && !messages.length && <div className="baseai-welcome"><h3>What would you like to know?</h3><p>Ask a question about your company’s knowledge. BaseAI will search your authorized documents and cite its sources.</p></div>}
+    {fullPage && messages.length > 0 && <div className="baseai-transcript" aria-label="Conversation messages">
+      {messages.map((message, index) => <article className={`baseai-message baseai-message-${message.role}`} key={message.id || `${message.role}-${index}`}>
+        {message.role === 'user' ? <p>{message.content}</p> : <>
+          <span className="answer-label">{message.metadata?.answer_type === 'general' ? 'General information · not company policy' : message.metadata?.insufficient_evidence ? 'Insufficient evidence' : 'Grounded in authorized documents'}</span>
+          <FormattedAnswer text={message.content || ''} />
+          {message.citations?.length > 0 && <div className="citation-list" aria-label="Answer sources">{message.citations.map((citation) => <article className="citation-card" key={`${message.id || index}-${citation.source_id}`}><span className="citation-marker">[{citation.source_id}]</span><div className="citation-content"><strong>{citation.document_title}</strong><small>{citation.source_reference || (citation.chunk_index != null ? `Chunk ${citation.chunk_index + 1}` : '')}</small>{citation.excerpt && <p>{citation.excerpt}</p>}</div></article>)}</div>}
+        </>}
+      </article>)}
+    </div>}
     <ErrorMessage>{error}</ErrorMessage>
     <form className="baseai-form" onSubmit={submit}>
       <label className="sr-only" htmlFor={documentId ? 'study-baseai-question' : 'baseai-question'}>Your question</label>
@@ -142,7 +217,7 @@ export default function BaseAI({ documentId, documentTitle, compact = false, sug
         </button>
       </div>
     </form>
-    {suggestions.length > 0 && !response && <div className="baseai-suggestions">
+    {suggestions.length > 0 && !response && !messages.length && <div className="baseai-suggestions">
       <span className="eyebrow">TRY A QUESTION</span>
       {suggestions.map((item) => <button type="button" key={item} disabled={loading}
         onClick={() => { setQuestion(item); setError('') }}>{item}</button>)}

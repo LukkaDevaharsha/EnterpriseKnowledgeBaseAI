@@ -8,13 +8,7 @@ const EXAMPLES = [
 
 export default function AskQuestion() {
   return <div className="page-content ask-page">
-    <header className="page-heading">
-      <div><span className="eyebrow">ENTERPRISE KNOWLEDGE ASSISTANT</span>
-        <h1>Ask BaseAI</h1>
-        <p>Get answers grounded in the sources available to your account.</p>
-      </div>
-    </header>
-    <BaseAI suggestions={EXAMPLES} />
-    <p className="privacy-note">Questions are not saved as conversation history. Document citations identify passages used for each answer.</p>
+    <BaseAI fullPage suggestions={EXAMPLES} />
+    <p className="privacy-note">Your conversations are saved to your account. Document citations identify passages used for each answer.</p>
   </div>
 }

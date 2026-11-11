@@ -11,6 +11,7 @@ import Library from './pages/Library'
 import AskQuestion from './pages/AskQuestion'
 import Admin from './pages/Admin'
 import StudyPDF from './pages/StudyPDF'
+import SharedConversation from './pages/SharedConversation'
 import './App.css'
 
 const PAGE_TITLES = {
@@ -127,6 +128,7 @@ function RouteTree({ theme, setTheme }) {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/shared/:shareToken" element={<SharedConversation />} />
       <Route element={<ProtectedRoute><ApplicationLayout theme={theme} setTheme={setTheme} /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />
         <Route path="library" element={<Library />} />

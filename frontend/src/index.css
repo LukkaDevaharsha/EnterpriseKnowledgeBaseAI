@@ -1,49 +1,49 @@
 :root {
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   line-height: 1.5;
-  color: #F0F3F6;
-  background: #0C1420;
+  color: #EEF3F9;
+  background: #001B2E;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --bg-primary: #0C1420;
-  --bg-secondary: #101714;
-  --bg-sidebar: #141E27;
-  --surface-primary: #172333;
-  --surface-secondary: #19231E;
-  --surface-elevated: #202F40;
-  --surface-hover: #253129;
-  --accent-primary: #C28B61;
-  --accent-secondary: #91B8D5;
-  --accent-ai: #91AE98;
-  --accent-platinum: #B8C5D1;
-  --text-primary: #F0F3F6;
-  --text-secondary: #A2AEA4;
-  --text-muted: #82909E;
-  --border-primary: #2B3A4B;
-  --border-secondary: #344239;
-  --success: #91AE98;
-  --warning: #D8AE6A;
-  --danger: #CF7777;
+  --bg-primary: #001B2E;
+  --bg-secondary: #1D3F58;
+  --bg-sidebar: #001B2E;
+  --surface-primary: #1D3F58;
+  --surface-secondary: #1D3F58;
+  --surface-elevated: #1D3F58;
+  --surface-hover: #537692;
+  --accent-primary: #B3CDE4;
+  --accent-secondary: #537692;
+  --accent-ai: #B3CDE4;
+  --accent-platinum: #B3CDE4;
+  --text-primary: #EEF3F9;
+  --text-secondary: #B3CDE4;
+  --text-muted: #B3CDE4;
+  --border-primary: #537692;
+  --border-secondary: #537692;
+  --success: #B3CDE4;
+  --warning: #B3CDE4;
+  --danger: #B3CDE4;
   --ink: var(--text-primary);
   --ink-soft: var(--accent-platinum);
   --muted: var(--text-secondary);
   --subtle: var(--text-muted);
   --line: var(--border-primary);
-  --line-strong: #405267;
+  --line-strong: #537692;
   --surface: var(--surface-primary);
   --canvas: var(--bg-primary);
   --canvas-raised: var(--surface-elevated);
   --brand: var(--accent-primary);
-  --brand-dark: #D49A6D;
-  --brand-soft: #30271F;
+  --brand-dark: #B3CDE4;
+  --brand-soft: #1D3F58;
   --purple: var(--accent-ai);
   --teal: var(--accent-secondary);
   --cyan: var(--accent-secondary);
   --coral: var(--accent-primary);
-  --shadow-sm: 0 2px 12px rgb(0 0 0 / 16%);
-  --shadow-md: 0 16px 42px rgb(0 0 0 / 38%);
-  --shadow-brand: 0 3px 12px rgb(194 139 97 / 18%);
+  --shadow-sm: 0 2px 16px rgb(0 0 0 / 16%);
+  --shadow-md: 0 16px 42px rgb(0 0 0 / 32%);
+  --shadow-brand: 0 3px 14px rgb(83 118 146 / 28%);
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
@@ -68,8 +68,8 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
 a { color: inherit; }
 img, svg { max-width: 100%; }
-::selection { color: #175d91; background: #c9f2ff; }
-:focus-visible { outline: 3px solid rgb(19 191 232 / 55%); outline-offset: 2px; }
+::selection { color: #001B2E; background: #B3CDE4; }
+:focus-visible { outline: 3px solid rgb(179 205 228 / 65%); outline-offset: 2px; }
 #root { min-height: 100vh; }
 
 @media (prefers-reduced-motion: reduce) {

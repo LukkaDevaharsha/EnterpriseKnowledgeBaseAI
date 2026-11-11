@@ -394,7 +394,7 @@ def create_app(config_overrides=None):
 
     # Import every model so SQLAlchemy and Flask-Migrate can discover them.
     from app.models import (  # noqa: F401
-        AuditEvent, Document, DocumentChunk, RegistrationChallenge, User,
+        AuditEvent, Document, DocumentChunk, RegistrationChallenge, User, Conversation, ConversationMessage,
     )
 
     from app.services.employee_ids import next_employee_id
@@ -469,6 +469,7 @@ def create_app(config_overrides=None):
     from app.routes.documents import documents_bp
     from app.routes.search import search_bp
     from app.routes.ask import ask_bp
+    from app.routes.conversations import conversations_bp
     from app.routes.admin import admin_bp, shared_bp
     from app.services.chunk_embedding_pipeline import reembed_all_chunks
 
@@ -476,6 +477,7 @@ def create_app(config_overrides=None):
     app.register_blueprint(documents_bp)
     app.register_blueprint(search_bp)
     app.register_blueprint(ask_bp)
+    app.register_blueprint(conversations_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(shared_bp)
 

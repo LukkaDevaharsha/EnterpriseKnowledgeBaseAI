@@ -109,10 +109,6 @@ function LibraryIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21V5.5Z" /><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20M8 7h8M8 10h8" /></svg>
 }
 
-function AssistantIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9l5.3 1.8-5.3 1.7-1.7 5.5-1.8-5.5L5 10.8 10.2 9 12 3.5Z" /><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" /></svg>
-}
-
 function DocxRuns({ runs, fallback, query }) {
   return highlightRuns(runs, fallback, query)
 }
@@ -818,7 +814,9 @@ export default function StudyPDF() {
           <div className="reader-toolbar-actions">
             {pdfUrl && <a className="button button-secondary button-small" href={pdfUrl} download={selectedDocument?.original_filename || 'document.pdf'}>Download</a>}
             <button type="button" className="reader-icon-button assistant-launcher" aria-label="Open BaseAI study assistant"
-              aria-expanded={assistantOpen} onClick={() => { setAssistantOpen(true); setActiveStudySection('assistant') }}><AssistantIcon /><span>Ask BaseAI</span></button>
+              title="Ask BaseAI" aria-expanded={assistantOpen} onClick={() => { setAssistantOpen(true); setActiveStudySection('assistant') }}>
+              <img className="assistant-launcher-icon" src="/Screenshot%202026-11-09%20010326.png" alt="" />
+            </button>
           </div>
         </div>
         {selectedDocument && <div className="reader-search-tools">
