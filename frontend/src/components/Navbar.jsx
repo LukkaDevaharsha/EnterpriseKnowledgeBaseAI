@@ -57,7 +57,7 @@ const EMPLOYEE_LINKS = [
 
 const ADMIN_EXTRA = [{ to: '/admin', label: 'Administration', icon: 'admin' }]
 
-export default function Navbar({ mobileOpen = false, collapsed = false, onToggle = () => {}, onNavigate = () => {} }) {
+export default function Navbar({ mobileOpen = false, collapsed = false, compactSidebarLayout = false, onToggle = () => {}, onNavigate = () => {} }) {
   const { user, token } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -195,10 +195,10 @@ export default function Navbar({ mobileOpen = false, collapsed = false, onToggle
 
   return (
     <aside id="primary-navigation" className={`sidebar${mobileOpen ? ' sidebar-open' : ''}${collapsed ? ' sidebar-icons-only' : ''}`}>
-      <button type="button" className="sidebar-toggle" onClick={onToggle}
+      <button type="button" className={collapsed && compactSidebarLayout ? 'nav-link chat-history-section-toggle' : 'sidebar-toggle'} onClick={onToggle}
         aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
         aria-expanded={!collapsed} title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2" /><path d={collapsed ? 'M8 4v16m4-11 3 3-3 3' : 'M9 4v16m7-11-3 3 3 3'} /></svg>
+        <svg className={collapsed && compactSidebarLayout ? 'nav-icon' : undefined} viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2" /><path d={collapsed ? 'M8 4v16m4-11 3 3-3 3' : 'M9 4v16m7-11-3 3 3 3'} /></svg>
       </button>
       <NavLink className="brand" to="/" aria-label="Enterprise Knowledge Base" onClick={onNavigate}>
         <span className="brand-mark" aria-hidden="true"><img className="brand-logo-img" src="/Screenshot%202026-11-09%20010326.png" alt="" /></span>

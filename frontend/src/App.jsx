@@ -1,5 +1,5 @@
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AuthProvider from './context/AuthContext'
 import { useAuth } from './context/useAuth'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -27,8 +27,38 @@ function ApplicationLayout({ theme, setTheme }) {
   const location = useLocation()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [isMobileLayout, setIsMobileLayout] = useState(false)
+  const [isCompactSidebarLayout, setIsCompactSidebarLayout] = useState(false)
+  const appShellRef = useRef(null)
+  const mobileLayoutRef = useRef(false)
   const navigate = useNavigate()
   function signOut() { logout(); navigate('/login', { replace: true }) }
+  useEffect(() => {
+    const appShell = appShellRef.current
+    if (!appShell) return undefined
+
+    function syncLayoutMode() {
+      const width = appShell.getBoundingClientRect().width
+      const nextIsMobile = width <= 700
+      setIsCompactSidebarLayout(width > 700 && width <= 850)
+      if (mobileLayoutRef.current === nextIsMobile) return
+
+      mobileLayoutRef.current = nextIsMobile
+      setIsMobileLayout(nextIsMobile)
+      setMobileNavOpen(false)
+      if (nextIsMobile) setSidebarCollapsed(false)
+    }
+
+    syncLayoutMode()
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(syncLayoutMode)
+      observer.observe(appShell)
+      return () => observer.disconnect()
+    }
+
+    window.addEventListener('resize', syncLayoutMode)
+    return () => window.removeEventListener('resize', syncLayoutMode)
+  }, [])
   useEffect(() => {
     if (!mobileNavOpen) return undefined
     const previousOverflow = document.body.style.overflow
@@ -43,7 +73,7 @@ function ApplicationLayout({ theme, setTheme }) {
     }
   }, [mobileNavOpen])
   function toggleSidebar() {
-    if (window.matchMedia('(max-width: 1100px)').matches) {
+    if (isMobileLayout) {
       setMobileNavOpen((open) => !open)
       return
     }
@@ -52,8 +82,9 @@ function ApplicationLayout({ theme, setTheme }) {
   const pageTitle = PAGE_TITLES[location.pathname] || 'Knowledge Base'
 
   return (
-    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div ref={appShellRef} className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <Navbar mobileOpen={mobileNavOpen} collapsed={sidebarCollapsed}
+        compactSidebarLayout={isCompactSidebarLayout}
         onToggle={toggleSidebar}
         onNavigate={() => setMobileNavOpen(false)} />
       {mobileNavOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
