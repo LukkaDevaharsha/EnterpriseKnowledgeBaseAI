@@ -53,6 +53,7 @@ export const authApi = {
   login: (credentials) => apiRequest('/api/auth/login', { method: 'POST', body: credentials }),
   register: (details) => apiRequest('/api/auth/register', { method: 'POST', body: details }),
   me: (token) => apiRequest('/api/auth/me', { token }),
+  updateProfile: (token, changes) => apiRequest('/api/auth/me', { token, method: 'PATCH', body: changes }),
   verify: (credentials) => apiRequest('/api/auth/verify', { method: 'POST', body: credentials }),
   resendVerification: (email) => apiRequest('/api/auth/resend-verification', { method: 'POST', body: { email } }),
 }
@@ -132,6 +133,8 @@ export const adminApi = {
   employees: (token, page = 1, perPage = 100) => apiRequest(`/api/admin/employees?page=${page}&per_page=${perPage}`, { token }),
   updateEmployee: (token, id, changes) => apiRequest(`/api/admin/employees/${id}`, { token, method: 'PATCH', body: changes }),
   documents: (token) => apiRequest('/api/admin/documents?per_page=100', { token }),
+  userDocuments: (token, page = 1) => apiRequest(`/api/admin/user-documents?page=${page}&per_page=100`, { token }),
+  previewDocument: (token, id) => apiRequest(`/api/admin/documents/${id}/preview`, { token }),
   uploadDocument: (token, formData) => apiRequest('/api/admin/documents', { token, method: 'POST', body: formData }),
   inspectDocument: (token, id) => apiRequest(`/api/admin/documents/${id}`, { token }),
   deleteDocument: (token, id) => apiRequest(`/api/admin/documents/${id}`, { token, method: 'DELETE' }),
@@ -154,4 +157,9 @@ export const studyApi = {
     return authorizedBlob(token, `/api/study/documents/${id}/slides/${slideNumber}/render?${params}`)
   },
   ask: (token, id, question, topK = 5, signal) => ragApi.ask(token, question, topK, { documentId: id, signal }),
+  conversations: (token, id) => apiRequest(`/api/study/documents/${id}/conversations`, { token }),
+  getConversation: (token, documentId, conversationId) => apiRequest(`/api/study/documents/${documentId}/conversations/${conversationId}`, { token }),
+  createConversation: (token, id) => apiRequest(`/api/study/documents/${id}/conversations`, { token, method: 'POST', body: {} }),
+  deleteConversation: (token, documentId, conversationId) => apiRequest(`/api/study/documents/${documentId}/conversations/${conversationId}`, { token, method: 'DELETE' }),
+  chat: (token, id, question, conversationId, topK = 5, signal) => apiRequest(`/api/study/documents/${id}/chat`, { token, method: 'POST', body: { question, conversation_id: conversationId, top_k: topK }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000) }),
 }

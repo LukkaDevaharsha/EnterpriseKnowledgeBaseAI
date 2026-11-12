@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { conversationsApi, ragApi } from '../api/client'
+import { conversationsApi, ragApi, studyApi } from '../api/client'
 import { EmptyState, ErrorMessage } from './Feedback'
 import { useAuth } from '../context/useAuth'
 
@@ -67,17 +67,34 @@ function FormattedAnswer({ text }) {
   return <div className="answer-content">{sections}</div>
 }
 
-export default function BaseAI({ documentId, documentTitle, compact = false, fullPage = false, suggestions = [] }) {
-  const { token } = useAuth()
+export default function BaseAI({ documentId, documentTitle, compact = false, fullPage = false, studyMode = false, suggestions = [] }) {
+  const { token, user } = useAuth()
   const [question, setQuestion] = useState('')
   const [response, setResponse] = useState(null)
   const [messages, setMessages] = useState([])
   const [conversationId, setConversationId] = useState(null)
+  const [studyConversations, setStudyConversations] = useState([])
+  const [studyHistoryError, setStudyHistoryError] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const controllerRef = useRef(null)
 
   useEffect(() => () => controllerRef.current?.abort(), [documentId])
+
+  useEffect(() => {
+    if (!studyMode || !documentId) return undefined
+    let active = true
+    studyApi.conversations(token, documentId).then(async (result) => {
+      if (!active) return
+      const rows = result.conversations || []
+      setStudyConversations(rows)
+      if (rows.length) {
+        const chat = await studyApi.getConversation(token, documentId, rows[0].id)
+        if (active) { setConversationId(chat.id); setMessages(chat.messages || []) }
+      } else { setConversationId(null); setMessages([]) }
+    }).catch((err) => { if (active) setStudyHistoryError(err.message) })
+    return () => { active = false }
+  }, [studyMode, documentId, token])
 
   useEffect(() => {
     if (!fullPage || documentId) return undefined
@@ -126,7 +143,15 @@ export default function BaseAI({ documentId, documentTitle, compact = false, ful
     const prompt = question.trim()
     try {
       let activeConversationId = conversationId
-      if (fullPage && !documentId) {
+      if (studyMode) {
+        const result = await studyApi.chat(token, documentId, prompt, conversationId || undefined, 5, controller.signal)
+        if (!controller.signal.aborted) {
+          setConversationId(result.conversation.id)
+          setMessages((current) => [...current, ...(result.messages || [])])
+          setStudyConversations((current) => [result.conversation, ...current.filter((item) => item.id !== result.conversation.id)])
+          setQuestion('')
+        }
+      } else if (fullPage && !documentId) {
         if (!activeConversationId) {
           const created = await conversationsApi.create(token)
           activeConversationId = created.id
@@ -137,6 +162,7 @@ export default function BaseAI({ documentId, documentTitle, compact = false, ful
         setMessages((current) => [...current, { role: 'user', content: prompt, citations: [], metadata: {} }])
         window.dispatchEvent(new Event('conversation:changed'))
       }
+      if (studyMode) return
       const result = await ragApi.ask(token, prompt, 5, {
         documentId: documentId || undefined,
         signal: controller.signal,
@@ -179,6 +205,32 @@ export default function BaseAI({ documentId, documentTitle, compact = false, ful
     setError('')
   }
 
+  async function selectStudyConversation(id) {
+    try {
+      const chat = await studyApi.getConversation(token, documentId, id)
+      setConversationId(chat.id); setMessages(chat.messages || []); setError(''); setResponse(null)
+    } catch (err) { setError(err.message) }
+  }
+  async function newStudyConversation() {
+    try {
+      const chat = await studyApi.createConversation(token, documentId)
+      setConversationId(chat.id); setMessages([]); setError(''); setResponse(null)
+      setStudyConversations((current) => [chat, ...current])
+    } catch (err) { setError(err.message) }
+  }
+  async function deleteStudyConversation(chat) {
+    if (!window.confirm(`Delete “${chat.title}” and its messages?`)) return
+    try {
+      await studyApi.deleteConversation(token, documentId, chat.id)
+      const remaining = studyConversations.filter((item) => item.id !== chat.id)
+      setStudyConversations(remaining)
+      if (conversationId === chat.id) {
+        setConversationId(null); setMessages([])
+        if (remaining.length) await selectStudyConversation(remaining[0].id)
+      }
+    } catch (err) { setError(err.message) }
+  }
+
   const displayAnswer = response?.answer_type === 'general'
     ? response.answer.replace(/^General information\s*\(not company policy\):\s*/i, '')
     : response?.answer
@@ -190,11 +242,19 @@ export default function BaseAI({ documentId, documentTitle, compact = false, ful
         <h2>{documentId ? 'Ask about this PDF' : 'Ask BaseAI'}</h2>
       </div>
     </div>
-    {documentId
+    {user?.role === 'ADMIN' && !documentId
+      ? <p className="baseai-scope">General knowledge only. Administrator requests never search company or user documents.</p>
+      : documentId
       ? <p className="baseai-scope">Questions are searched only in <strong>{documentTitle || 'the selected PDF'}</strong>.</p>
       : <p className="baseai-scope">Answers use documents you are authorized to access. General responses are labeled clearly.</p>}
-    {fullPage && !messages.length && <div className="baseai-welcome"><h3>What would you like to know?</h3><p>Ask a question about your company’s knowledge. BaseAI will search your authorized documents and cite its sources.</p></div>}
-    {fullPage && messages.length > 0 && <div className="baseai-transcript" aria-label="Conversation messages">
+    {studyMode && <div className="study-chat-history"><div><strong>Conversations</strong><button type="button" className="button button-secondary button-small" onClick={newStudyConversation}>New conversation</button></div>
+      {studyHistoryError && <p role="alert">{studyHistoryError}</p>}
+      {studyConversations.map((chat) => <div className={`study-chat-history-row${chat.id === conversationId ? ' active' : ''}`} key={chat.id}>
+        <button type="button" onClick={() => selectStudyConversation(chat.id)} title={chat.title}>{chat.title}</button><button type="button" aria-label={`Delete ${chat.title}`} onClick={() => deleteStudyConversation(chat)}>×</button>
+      </div>)}
+    </div>}
+    {fullPage && !messages.length && <div className="baseai-welcome"><h3>What would you like to know?</h3><p>{user?.role === 'ADMIN' ? 'Ask a general knowledge question. Administrator conversations do not search documents.' : 'Ask a question about your company’s knowledge. BaseAI will search your authorized documents and cite its sources.'}</p></div>}
+    {(fullPage || studyMode) && messages.length > 0 && <div className="baseai-transcript" aria-label="Conversation messages">
       {messages.map((message, index) => <article className={`baseai-message baseai-message-${message.role}`} key={message.id || `${message.role}-${index}`}>
         {message.role === 'user' ? <p>{message.content}</p> : <>
           <span className="answer-label">{message.metadata?.answer_type === 'general' ? 'General information · not company policy' : message.metadata?.insufficient_evidence ? 'Insufficient evidence' : 'Grounded in authorized documents'}</span>

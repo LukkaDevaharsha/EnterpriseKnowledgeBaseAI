@@ -276,6 +276,10 @@ def download_document(document_id):
 
     if user is None:
         return error("Active user account required.", 403)
+    if user.role == "ADMIN":
+        return error("Administrators cannot download user documents.", 403)
+    if user.role == "ADMIN":
+        return error("Administrators cannot download user documents.", 403)
 
     document = Document.query.filter_by(
         id=document_id,

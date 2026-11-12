@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { adminApi } from '../api/client'
 import { EmptyState, ErrorMessage, PageLoading } from '../components/Feedback'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -12,11 +13,16 @@ const formatBytes = (size = 0) => size < 1024 * 1024
 
 export default function Admin() {
   const { token, user } = useAuth()
+  const location = useLocation()
   const [stats, setStats] = useState(null)
   const [employees, setEmployees] = useState([])
   const [employeePagination, setEmployeePagination] = useState(null)
   const [employeePage, setEmployeePage] = useState(1)
   const [documents, setDocuments] = useState([])
+  const [userDocuments, setUserDocuments] = useState([])
+  const [userDocumentPagination, setUserDocumentPagination] = useState(null)
+  const [userDocumentPage, setUserDocumentPage] = useState(1)
+  const [userDocumentPreview, setUserDocumentPreview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -30,35 +36,47 @@ export default function Admin() {
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true)
     try {
-      const [statResult, employeeResult, documentResult, auditResult] = await Promise.all([
+      const [statResult, employeeResult, documentResult, userDocumentResult, auditResult] = await Promise.all([
         adminApi.stats(token), adminApi.employees(token, employeePage),
-        adminApi.documents(token), adminApi.audit(token),
+        adminApi.documents(token), adminApi.userDocuments(token, userDocumentPage), adminApi.audit(token),
       ])
       setStats(statResult.stats)
       setEmployees(employeeResult.employees || [])
       setEmployeePagination(employeeResult.pagination)
       setDocuments(documentResult.documents || [])
+      setUserDocuments(userDocumentResult.documents || [])
+      setUserDocumentPagination(userDocumentResult.pagination)
       setAuditEvents(auditResult.events || [])
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
-  }, [token, employeePage])
+  }, [token, employeePage, userDocumentPage])
 
   useEffect(() => {
     let active = true
     Promise.all([
       adminApi.stats(token), adminApi.employees(token, employeePage),
-      adminApi.documents(token), adminApi.audit(token),
-    ]).then(([statResult, employeeResult, documentResult, auditResult]) => {
+      adminApi.documents(token), adminApi.userDocuments(token, userDocumentPage), adminApi.audit(token),
+    ]).then(([statResult, employeeResult, documentResult, userDocumentResult, auditResult]) => {
       if (!active) return
       setStats(statResult.stats)
       setEmployees(employeeResult.employees || [])
       setEmployeePagination(employeeResult.pagination)
       setDocuments(documentResult.documents || [])
+      setUserDocuments(userDocumentResult.documents || [])
+      setUserDocumentPagination(userDocumentResult.pagination)
       setAuditEvents(auditResult.events || [])
     }).catch((err) => { if (active) setError(err.message) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [token, employeePage])
+  }, [token, employeePage, userDocumentPage])
+
+  useEffect(() => {
+    if (loading || location.hash !== '#user-documents') return undefined
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('user-documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [loading, location.hash])
 
   async function updateEmployee(employee, changes) {
     setBusy(true); setError(''); setNotice('')
@@ -129,6 +147,15 @@ export default function Admin() {
     try {
       const result = await adminApi.inspectDocument(token, doc.id)
       setInspectedDocument(result.document)
+    } catch (err) { setError(err.message) }
+  }
+
+  async function previewUserDocument(doc) {
+    setError(''); setUserDocumentPreview(null)
+    try {
+      const result = await adminApi.previewDocument(token, doc.id)
+      setUserDocumentPreview(result)
+      await refresh(false)
     } catch (err) { setError(err.message) }
   }
 
@@ -229,13 +256,32 @@ export default function Admin() {
           })}</div>}
         {inspectedDocument && <section className="admin-inspection" aria-label={`Inspect ${inspectedDocument.title}`}>
           <div className="section-header-row"><div><span className="eyebrow">INDEX DETAILS</span><h3>{inspectedDocument.title}</h3>
-            <p>{inspectedDocument.status} · {inspectedDocument.chunks?.length || 0} chunks</p></div>
+            <p>{inspectedDocument.status} · {inspectedDocument.chunk_count ?? 0} indexed chunks</p></div>
             <button type="button" className="button button-tertiary button-small" onClick={() => setInspectedDocument(null)}>Close</button></div>
           {inspectedDocument.processing_error && <ErrorMessage>{inspectedDocument.processing_error}</ErrorMessage>}
-          <div className="admin-chunks">{(inspectedDocument.chunks || []).map((chunk) => <article key={chunk.chunk_id}>
-            <div><strong>Chunk {chunk.chunk_index + 1}</strong><span>{chunk.embedding_status}{chunk.page_number ? ` · page ${chunk.page_number}` : ''}</span></div><p>{chunk.content}</p>
-          </article>)}</div>
+          <dl className="profile-details"><div><dt>File type</dt><dd>{inspectedDocument.file_type}</dd></div>
+            <div><dt>Uploaded by user</dt><dd>{inspectedDocument.uploaded_by}</dd></div>
+            <div><dt>Uploaded</dt><dd>{inspectedDocument.created_at ? new Date(inspectedDocument.created_at).toLocaleString() : 'Unavailable'}</dd></div>
+            <div><dt>Indexed chunks</dt><dd>{inspectedDocument.chunk_count ?? 0}</dd></div></dl>
         </section>}
+      </section>
+
+      <section className="panel admin-section" id="user-documents">
+        <div className="section-header-row"><div><span className="eyebrow">READ ONLY</span><h2>User Documents</h2>
+          <p>Preview document text and metadata. Original files, chat history, and AI tools are unavailable here.</p></div></div>
+        {userDocuments.length === 0 ? <EmptyState title="No uploaded documents">User uploads will appear here.</EmptyState>
+          : <div className="shared-document-list">{userDocuments.map((doc) => <article className="shared-document-row" key={doc.id}>
+            <span className={`file-badge ${doc.file_type?.toLowerCase()}`}>{doc.file_type}</span>
+            <div className="document-info"><strong title={doc.title}>{doc.title}</strong>
+              <small>{doc.owner?.name || 'Unknown owner'} · User {doc.owner?.id ?? doc.uploaded_by} · Uploaded {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'date unavailable'}</small>
+              <small>{formatBytes(doc.file_size)}{doc.processing_error ? ` · ${doc.processing_error}` : ''}</small></div>
+            <span className={`status-pill status-${doc.status?.toLowerCase()}`}>{doc.status?.replaceAll('_', ' ')}</span>
+            <button type="button" className="button button-secondary button-small" disabled={doc.status !== 'PROCESSED'} onClick={() => previewUserDocument(doc)}>Preview</button>
+          </article>)}</div>}
+        {userDocumentPagination?.pages > 1 && <div className="pagination"><span>Page {userDocumentPage} of {userDocumentPagination.pages} · {userDocumentPagination.total} documents</span>
+          <div><button className="button button-secondary button-small" disabled={userDocumentPage <= 1 || loading} onClick={() => setUserDocumentPage((page) => page - 1)}>Previous</button>
+            <button className="button button-secondary button-small" disabled={userDocumentPage >= userDocumentPagination.pages || loading} onClick={() => setUserDocumentPage((page) => page + 1)}>Next</button></div>
+        </div>}
       </section>
 
       <section className="panel admin-section"><div className="section-header-row"><div><span className="eyebrow">AUDIT TRAIL</span><h2>Recent administrator activity</h2></div></div>
@@ -253,6 +299,14 @@ export default function Admin() {
           <div><dt>Department</dt><dd>{selectedEmployee.department}</dd></div><div><dt>Role</dt><dd>{selectedEmployee.role}</dd></div>
           <div><dt>Account</dt><dd>{selectedEmployee.is_active ? 'Active' : 'Inactive'}</dd></div><div><dt>Email verification</dt><dd>{selectedEmployee.is_verified ? 'Verified' : 'Unverified'}</dd></div>
         </dl>
+      </section>
+    </div>}
+    {userDocumentPreview && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setUserDocumentPreview(null) }}>
+      <section className="admin-document-preview panel" role="dialog" aria-modal="true" aria-labelledby="admin-document-preview-title">
+        <div className="section-header-row"><div><span className="eyebrow">READ ONLY PREVIEW</span><h2 id="admin-document-preview-title">{userDocumentPreview.document.title}</h2>
+          <p>Owner: {userDocumentPreview.owner.name} · Uploaded {userDocumentPreview.document.created_at ? new Date(userDocumentPreview.document.created_at).toLocaleString() : 'date unavailable'}</p></div>
+          <button type="button" className="button button-tertiary button-small" onClick={() => setUserDocumentPreview(null)}>Close</button></div>
+        <div className="admin-preview-pages">{userDocumentPreview.pages?.map((page) => <article key={page.page_number}><h3>{userDocumentPreview.pages.length > 1 ? `Page ${page.page_number}` : 'Document preview'}</h3><pre>{page.text || 'No preview text available.'}</pre></article>)}</div>
       </section>
     </div>}
     <ConfirmDialog

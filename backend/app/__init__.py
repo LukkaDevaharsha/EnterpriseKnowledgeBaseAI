@@ -406,6 +406,8 @@ def create_app(config_overrides=None):
     from app.models import (  # noqa: F401
         AuditEvent, Document, DocumentChunk, RegistrationChallenge, User, Conversation, ConversationMessage,
     )
+    from app.routes.study_conversations import study_conversations_bp
+    app.register_blueprint(study_conversations_bp)
 
     from app.services.employee_ids import next_employee_id
 

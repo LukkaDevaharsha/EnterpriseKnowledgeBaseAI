@@ -43,6 +43,11 @@ const NAV_ICONS = {
   ),
   admin: (
     <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3 8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-3Z" /><path d="M9 12h6m-3-3v6" />
+    </svg>
+  ),
+  profile: (
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
     </svg>
   ),
@@ -53,6 +58,7 @@ const EMPLOYEE_LINKS = [
   { to: '/library', label: 'Knowledge Library', icon: 'library' },
   { to: '/ask', label: 'Ask BaseAI', icon: 'ask' },
   { to: '/study', label: 'Study Documents', icon: 'study' },
+  { to: '/profile', label: 'My Profile', icon: 'profile' },
 ]
 
 const ADMIN_EXTRA = [{ to: '/admin', label: 'Administration', icon: 'admin' }]

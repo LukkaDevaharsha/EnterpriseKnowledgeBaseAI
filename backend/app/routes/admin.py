@@ -54,6 +54,8 @@ def _page():
 def _protected_document(document_id, admin=False, user=None):
     query = Document.query.filter_by(id=document_id)
     if not admin:
+        if user is None or user.role == "ADMIN":
+            return None
         query = query.filter(
             (Document.uploaded_by == user.id) | (Document.is_shared.is_(True))
         )
@@ -203,6 +205,70 @@ def list_documents():
                                    "total": pagination.total, "pages": pagination.pages}}), 200
 
 
+@admin_bp.get("/user-documents")
+@jwt_required()
+def list_user_documents():
+    """List uploaded documents with owner metadata, without indexed content."""
+    if _actor() is None:
+        return _error("Administrator access required.", 403)
+    paging = _page()
+    if paging is None:
+        return _error("Invalid pagination values.", 400)
+    page, per_page = paging
+    pagination = Document.query.order_by(Document.created_at.desc(), Document.id.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    owners = {user.id: user for user in User.query.filter(
+        User.id.in_([doc.uploaded_by for doc in pagination.items])
+    ).all()} if pagination.items else {}
+    documents = []
+    for doc in pagination.items:
+        item = doc.to_dict()
+        owner = owners.get(doc.uploaded_by)
+        item["owner"] = {"id": owner.id, "name": owner.name} if owner else {"id": doc.uploaded_by, "name": "Unknown user"}
+        documents.append(item)
+    return jsonify({"status": "success", "documents": documents,
+                    "pagination": {"page": page, "per_page": per_page,
+                                   "total": pagination.total, "pages": pagination.pages}}), 200
+
+
+@admin_bp.get("/documents/<int:document_id>/preview")
+@jwt_required()
+def preview_user_document(document_id):
+    """Return extracted preview text and audit the administrator view."""
+    actor = _actor()
+    if actor is None:
+        return _error("Administrator access required.", 403)
+    document = db.session.get(Document, document_id)
+    if document is None:
+        return _error("Document not found.", 404)
+    if document.status != "PROCESSED":
+        return _error("Only processed documents can be previewed.", 409)
+    try:
+        content = get_storage().read(document.stored_filename)
+        pages = extract_document_pages(content, document.file_type)
+    except FileNotFoundError:
+        return _error("Document file is missing from storage.", 404)
+    except StorageError:
+        return _error("Document storage is unavailable.", 503)
+    except ValueError:
+        return _error("Document preview could not be generated.", 422)
+    try:
+        record_admin_action(actor.id, "document.preview", "document", document.id,
+                            {"document_owner_id": document.uploaded_by})
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("Administrator document preview audit failed.")
+        return _error("Document preview is temporarily unavailable.", 503)
+    response = jsonify({"status": "success", "document": document.to_dict(),
+                        "owner": {"id": document.uploaded_by, "name": document.uploader.name},
+                        "pages": [{"page_number": number, "text": text} for number, text in pages]})
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response, 200
+
+
 @admin_bp.post("/documents")
 @jwt_required()
 def upload_shared_document():
@@ -233,13 +299,7 @@ def inspect_document(document_id):
     if document is None:
         return _error("Document not found.", 404)
     data = document.to_dict()
-    data["chunks"] = [{
-        "chunk_id": chunk.id, "chunk_index": chunk.chunk_index,
-        "page_number": chunk.page_number, "embedding_status": chunk.embedding_status,
-        "content": chunk.content,
-    } for chunk in DocumentChunk.query.filter_by(document_id=document.id).order_by(
-        DocumentChunk.chunk_index
-    ).all()]
+    data["chunk_count"] = DocumentChunk.query.filter_by(document_id=document.id).count()
     return jsonify({"status": "success", "document": data}), 200
 
 

@@ -39,6 +39,8 @@ def semantic_search():
         return _error("Search is temporarily unavailable.", 503)
     if user is None or not user.is_active:
         return _error("Active user account required.", 403)
+    if user.role == "ADMIN":
+        return _error("Administrators cannot inspect document search results.", 403)
 
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):

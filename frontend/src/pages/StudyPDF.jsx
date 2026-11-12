@@ -1036,7 +1036,7 @@ export default function StudyPDF() {
       {assistantOpen && <aside className="study-assistant panel" role="dialog" aria-modal="false" aria-label="BaseAI study assistant">
         <div className="study-assistant-heading"><div><span className="eyebrow">STUDY ASSISTANT</span><strong>{selectedDocument?.title}</strong></div>
           <button type="button" className="reader-icon-button" aria-label="Close BaseAI assistant" onClick={() => { setAssistantOpen(false); setActiveStudySection('viewer') }}>×</button></div>
-        <BaseAI key={documentId} compact documentId={documentId} documentTitle={selectedDocument?.title} />
+        <BaseAI key={documentId} compact studyMode documentId={documentId} documentTitle={selectedDocument?.title} />
       </aside>}
     </div>
   </div>

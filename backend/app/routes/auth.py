@@ -325,3 +325,34 @@ def profile():
         ),
         200,
     )
+
+
+@auth_bp.patch("/me")
+@jwt_required()
+def update_profile():
+    """Update only supported personal fields for the authenticated user."""
+    data, error_response = _json_payload()
+    if error_response is not None:
+        return error_response
+    if not data or set(data) - {"name", "department"}:
+        return _error("Only name and department can be updated.", 400)
+    try:
+        user_id = int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return _error("Invalid authentication token.", 401)
+    user = db.session.get(User, user_id)
+    if user is None or not user.is_active or not user.is_verified:
+        return _error("Active verified user account required.", 403)
+    errors = {}
+    for field, maximum in (("name", 120), ("department", 100)):
+        if field not in data:
+            continue
+        value, error = _clean_text(data[field], field, max_length=maximum)
+        if error:
+            errors[field] = error
+        else:
+            setattr(user, field, value)
+    if errors:
+        return _error("Validation failed.", 400, errors)
+    db.session.commit()
+    return jsonify({"status": "success", "user": user.to_dict()}), 200

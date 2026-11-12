@@ -2433,3 +2433,68 @@ html.study-panels-resizing * { cursor: col-resize !important; user-select: none 
   .history-dialog { width: 100%; padding: 20px; border-radius: 16px 16px 12px 12px; }
   .history-dialog-actions > .button { min-height: 44px; }
 }
+/* Profile and document scoped study chat additions. */
+.profile-page { max-width: 1040px; margin-inline: auto; }
+.profile-card { padding: clamp(20px, 4vw, 36px); }
+.profile-card-heading { display: flex; align-items: center; gap: 16px; padding-bottom: 24px; border-bottom: 1px solid var(--border-color, rgba(148,163,184,.2)); }
+.profile-card-heading h2 { margin: 0 0 4px; }
+.profile-card-heading p { margin: 0; color: var(--text-muted, #94a3b8); }
+.profile-avatar-large { width: 56px; height: 56px; display: grid; place-items: center; font-size: 22px; }
+.profile-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px; margin: 28px 0 0; }
+.profile-details div, .profile-form label { min-width: 0; }
+.profile-details dt { color: var(--text-muted, #94a3b8); font-size: 13px; margin-bottom: 6px; }
+.profile-details dd { margin: 0; overflow-wrap: anywhere; }
+.profile-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding-top: 24px; }
+.profile-form label { display: grid; gap: 8px; font-size: 14px; }
+.profile-form input { width: 100%; min-width: 0; }
+.profile-form input:disabled { opacity: .75; }
+.profile-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
+.profile-success { color: #22c55e; }
+.admin-document-preview { width: min(900px, 100%); max-height: min(88vh, 900px); display: flex; flex-direction: column; overflow: hidden; padding: clamp(18px, 3vw, 28px); }
+.admin-preview-pages { min-height: 0; overflow: auto; display: grid; gap: 14px; margin-top: 12px; }
+.admin-preview-pages article { padding: 16px; border: 1px solid var(--border-secondary, #d9e0e8); border-radius: 10px; background: var(--surface-secondary, #f3f6fa); }
+.admin-preview-pages h3 { margin: 0 0 10px; font-size: 13px; }
+.admin-preview-pages pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 13px; line-height: 1.65; }
+.study-chat-history { display: grid; gap: 6px; max-height: 180px; overflow: auto; border-block: 1px solid var(--border-color, rgba(148,163,184,.2)); padding: 10px 0; margin-bottom: 12px; }
+.study-chat-history > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.study-chat-history-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.study-chat-history-row button:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.study-chat-history-row.active button:first-child { color: var(--accent, #60a5fa); }
+@media (max-width: 600px) { .profile-details, .profile-form { grid-template-columns: 1fr; } .profile-actions { grid-column: auto; } }
+
+/* Give the Knowledge Library file picker the same finish as its form controls. */
+.upload-section .file-row input[type='file'] {
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--text-secondary, var(--muted));
+  background: var(--surface-primary, #fff);
+  font-size: 13px;
+}
+.upload-section .file-row input[type='file']::file-selector-button {
+  min-height: 32px;
+  padding: 0 13px;
+  margin-right: 11px;
+  border: 1px solid var(--border-secondary, #d9e0e8);
+  border-radius: 6px;
+  color: var(--text-primary, #263548);
+  background: var(--surface-secondary, #f3f6fa);
+  font: 650 12px/1 inherit;
+  cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
+}
+.upload-section .file-row input[type='file']::file-selector-button:hover {
+  border-color: var(--accent-primary, #7185ec);
+  color: var(--accent-primary, #5269d6);
+  background: color-mix(in srgb, var(--accent-primary, #7185ec) 10%, var(--surface-secondary, #f3f6fa));
+}
+.upload-section .file-row input[type='file']:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent-primary, #7185ec) 28%, transparent);
+  outline-offset: 2px;
+}
+:root[data-theme='dark'] .upload-section .file-row input[type='file']::file-selector-button {
+  border-color: var(--border-primary, #344456);
+  color: var(--text-primary, #e5edf5);
+  background: var(--surface-secondary, #172330);
+}

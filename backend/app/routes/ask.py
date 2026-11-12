@@ -1,5 +1,7 @@
 """JWT-protected RAG question-answering endpoint."""
 
+import re
+
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy.exc import SQLAlchemyError
@@ -7,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app import db
 from app.models import User
 from app.services import rag_service
+from app.services import rag_extensions
 from app.services.embedding_service import EmbeddingError
 from app.services.ollama_client import OllamaError
 from app.services.rag_service import RagValidationError
@@ -14,6 +17,11 @@ from app.services.semantic_search import SearchDatabaseError
 
 
 ask_bp = Blueprint("ask", __name__, url_prefix="/api")
+ADMIN_DOCUMENT_INTENT_RE = re.compile(
+    r"\b(?:documents?|files?|upload|handbook|pdf|docx|spreadsheet|"
+    r"employee|company|internal|policy|our|my employer)\b",
+    re.IGNORECASE,
+)
 
 
 def _error(message, status_code):
@@ -56,6 +64,20 @@ def ask():
             f"top_k must be between 1 and {current_app.config['RAG_MAX_TOP_K']}.",
             400,
         )
+
+    # Keep BaseAI available to administrators for general questions while
+    # guaranteeing their requests never enter retrieval or inspect document text.
+    if user.role == "ADMIN":
+        if (not rag_extensions._general_is_appropriate(question)
+                or ADMIN_DOCUMENT_INTENT_RE.search(question)):
+            return _error("Administrators can use BaseAI for general questions only.", 403)
+        try:
+            result = rag_extensions._general_answer(question)
+        except (OllamaError, SQLAlchemyError):
+            db.session.rollback()
+            current_app.logger.exception("Administrator general answer failed.")
+            return _error("Question answering is temporarily unavailable.", 503)
+        return jsonify({"status": "success", "question": question, **result}), 200
 
     try:
         result = rag_service.answer_question(question, user.id, top_k)

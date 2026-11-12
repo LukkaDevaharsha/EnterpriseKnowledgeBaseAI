@@ -15,13 +15,15 @@ def _owned(conversation_id):
         user_id = int(get_jwt_identity())
     except (TypeError, ValueError):
         return None
-    return Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
+    # These endpoints serve BaseAI's general history only. Document chats are
+    # managed through the document-scoped routes and stay out of this history.
+    return Conversation.query.filter_by(id=conversation_id, user_id=user_id, document_id=None).first()
 
 
 @conversations_bp.get("")
 @jwt_required()
 def list_conversations():
-    rows = Conversation.query.filter_by(user_id=int(get_jwt_identity())).order_by(
+    rows = Conversation.query.filter_by(user_id=int(get_jwt_identity()), document_id=None).order_by(
         Conversation.is_pinned.desc(), Conversation.updated_at.desc()).all()
     return jsonify({"conversations": [row.to_dict() for row in rows]})
 
@@ -132,7 +134,7 @@ def delete_conversation(conversation_id):
 
 @conversations_bp.get("/shared/<share_token>")
 def get_shared_conversation(share_token):
-    conversation = Conversation.query.filter_by(share_token=share_token).first()
+    conversation = Conversation.query.filter_by(share_token=share_token, document_id=None).first()
     if conversation is None or conversation.is_locked:
         return jsonify({"message": "Shared conversation not found."}), 404
     return jsonify(conversation.to_dict(include_messages=True))

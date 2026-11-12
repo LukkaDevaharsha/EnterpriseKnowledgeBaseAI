@@ -12,6 +12,7 @@ import AskQuestion from './pages/AskQuestion'
 import Admin from './pages/Admin'
 import StudyPDF from './pages/StudyPDF'
 import SharedConversation from './pages/SharedConversation'
+import Profile from './pages/Profile'
 import './App.css'
 
 const PAGE_TITLES = {
@@ -19,6 +20,7 @@ const PAGE_TITLES = {
   '/library': 'Knowledge Library',
   '/ask': 'Ask BaseAI',
   '/study': 'Study Documents',
+  '/profile': 'My Profile',
   '/admin': 'Administration',
 }
 
@@ -141,6 +143,11 @@ function AdminRoute({ children }) {
   return user?.role === 'ADMIN' ? children : <Navigate to="/" replace />
 }
 
+function StudyDocumentsRoute({ children }) {
+  const { user } = useAuth()
+  return user?.role === 'ADMIN' ? <Navigate to="/admin#user-documents" replace /> : children
+}
+
 function NotFound() {
   const { token, user, loading } = useAuth()
   if (loading) return <div className="route-loading">Restoring your session…</div>
@@ -164,7 +171,8 @@ function RouteTree({ theme, setTheme }) {
         <Route index element={<Dashboard />} />
         <Route path="library" element={<Library />} />
         <Route path="ask" element={<AskQuestion />} />
-        <Route path="study" element={<StudyPDF />} />
+        <Route path="study" element={<StudyDocumentsRoute><StudyPDF /></StudyDocumentsRoute>} />
+        <Route path="profile" element={<Profile />} />
         <Route path="admin" element={<AdminRoute><Admin /></AdminRoute>} />
         {/* Legacy redirects */}
         <Route path="documents" element={<Navigate to="/library" replace />} />
